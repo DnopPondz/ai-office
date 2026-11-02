@@ -392,6 +392,9 @@ button:disabled {
 /* Office map (8-bit pixel art) */
 .office {
   display: grid;
+  /* Rows keep their full height and the panel scrolls; otherwise a short screen squeezes
+     the map box and hides the lower half of the office (where the desks are). */
+  grid-auto-rows: max-content;
   gap: 10px;
   align-content: start;
   padding: 12px 16px;
