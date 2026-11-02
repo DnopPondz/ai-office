@@ -34,6 +34,8 @@ export interface ScriptedScene {
 
 interface QuietScript extends ScriptedScene {
   id: string;
+  // Business-specific scenes only appear for that business type.
+  business?: string;
 }
 
 const at = (spot: OfficeSpot, activity: string, mood: string): Presence => ({ spot, activity, mood });
@@ -539,8 +541,625 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
 ];
 
+// One scene per business type, drawn more often for that business (see pickQuietScript).
+const BUSINESS_SCRIPTS: QuietScript[] = [
+  {
+    id: "saas-sso",
+    business: "saas",
+    lines: [
+      say("sales", "general", "ลูกค้าองค์กรรายใหญ่ที่สุดบอกว่าจะไม่ต่อสัญญา ถ้าเราไม่มี SSO กับ audit log ภายในเดือนหน้า 😰"),
+      say("dev", "dev", "SSO ทำได้ แต่ audit log ต้องแก้ทุก service"),
+      say("sec", "dev", "ดีเลย{end} audit log ควรมีตั้งนานแล้ว ไว้ตรวจย้อนหลังเวลามีเหตุ 🛡️"),
+      say("pm", "dm", "ถ้าเสียลูกค้ารายนี้ รายได้หายไปเกือบ 30% นะ{ask} {I}แค่อยากให้ CEO เห็นภาพ"),
+    ],
+    presence: { sales: at("ceo", "รายงานลูกค้าจะหลุด", "😰"), dev: at("desk", "ประเมินงาน SSO", "🤔") },
+    prompt: "ลูกค้ารายใหญ่ขอ SSO และ audit log ก่อนต่อสัญญา จะทำยังไง",
+    options: [
+      {
+        label: "ให้ทีมทำเองทั้งหมดภายในเดือนนี้",
+        effects: { reputation: 8, morale: -8, security: 4 },
+        reactions: [
+          say("dev", "dev", "โอเค{end} เดือนนี้ไม่ต้องคุยเรื่องฟีเจอร์อื่นนะ"),
+          say("sales", "general", "ลูกค้าดีใจมาก! 💼"),
+        ],
+      },
+      {
+        label: "ใช้บริการ SSO สำเร็จรูป แล้วค่อยทำ audit log",
+        effects: { cash: -10, security: 6, reputation: 4 },
+        reactions: [
+          say("sec", "dev", "บริการสำเร็จรูปมี MFA มาให้ด้วย ดีเลย{end}"),
+          say("pm", "general", "{I}จะใส่ค่าบริการนี้ในงบไตรมาสนะ{ask}"),
+        ],
+      },
+      {
+        label: "ขอเลื่อนเป็นไตรมาสหน้า",
+        effects: { reputation: -8, cash: -6 },
+        reactions: [
+          say("sales", "dm", "ลูกค้าบอกว่าจะเริ่มคุยกับเจ้าอื่นแล้ว{end} 😩"),
+          say("dev", "dev", "อย่างน้อยเดือนนี้ได้นอน"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "clinic-xray",
+    business: "clinic",
+    lines: [
+      say("ops", "dev", "NAS ที่เก็บภาพ X-ray ทุกสาขาใช้รหัสเดียวกันหมด และเปิดให้เข้าจากอินเทอร์เน็ตได้ด้วย"),
+      say("sec", "dev", "นั่นคือข้อมูลสุขภาพของคนไข้นะ{ask} ถ้าหลุดคือเรื่องใหญ่ 😱"),
+      say("sales", "general", "หมอหลายท่านขอดูภาพจากที่บ้านตอนกลางคืน ถ้าปิดหมอบ่นแน่"),
+      say("pm", "dm", "{I}ไม่อยากให้หมอไม่พอใจ{end} แต่ก็ไม่อยากเป็นข่าว CEO ช่วยตัดสินใจที"),
+    ],
+    presence: { ops: at("server", "ตรวจ NAS", "😬"), sec: at("server", "ไล่ดูสิทธิ์", "😱") },
+    prompt: "NAS เก็บภาพ X-ray คนไข้เปิดจากอินเทอร์เน็ตด้วยรหัสเดียว จะแก้ยังไง",
+    options: [
+      {
+        label: "ปิดจากอินเทอร์เน็ต ให้หมอเข้าผ่าน VPN พร้อม MFA แยกบัญชีรายคน",
+        effects: { security: 12, cash: -6, morale: -3 },
+        reactions: [
+          say("sec", "general", "แบบนี้ถ้ามีใครเข้าดู เราจะรู้ว่าเป็นใคร{end} 🛡️"),
+          say("sales", "general", "หมอบางท่านบ่นเรื่อง MFA แต่ก็ยอม{end}"),
+        ],
+      },
+      {
+        label: "ย้ายภาพไประบบคลาวด์ที่ออกแบบมาสำหรับข้อมูลการแพทย์",
+        effects: { cash: -14, security: 10, uptime: -3 },
+        reactions: [
+          say("ops", "dev", "ย้ายข้อมูลหลายเทรา คงใช้เวลาหลายคืน"),
+          say("pm", "general", "{I}จะแจ้งทุกสาขาให้เตรียมตัวนะ{ask}"),
+        ],
+      },
+      {
+        label: "เปลี่ยนรหัสใหม่ให้ยากขึ้นไปก่อน",
+        effects: { security: 2, morale: 2 },
+        reactions: [
+          say("sec", "dm", "รหัสยากขึ้นแต่ยังเปิดจากอินเทอร์เน็ตอยู่ดีนะ{ask} {I}ขอบันทึกไว้ว่าไม่เห็นด้วย"),
+          say("sales", "general", "หมอโอเค{end} ไม่มีใครบ่น"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "ecommerce-flash",
+    business: "ecommerce",
+    lines: [
+      say("sales", "general", "อีก 3 วันถึง 11.11 แล้ว! {I}ตั้งโปรลด 90% ไว้ 100 ชิ้น ยิงแอดไปแล้วด้วย 🚀"),
+      say("ops", "dev", "ปีที่แล้วเว็บล่มตอนเที่ยงคืนตรง 40 นาที ปีนี้ยังไม่ได้ทดสอบโหลดเลย"),
+      say("dev", "dev", "ระบบตะกร้ายังไม่ได้แก้เรื่องสต็อกติดลบด้วยนะ"),
+      say("sec", "dev", "ช่วงเซลมีบอทกวาดของกับบัตรเครดิตขโมยมาลองจ่ายเยอะมาก{end} ต้องเตรียมด้วย"),
+      say("pm", "dm", "CEO {I}ว่าเราต้องเลือกสักอย่าง ทำทุกอย่างใน 3 วันไม่ทัน{end}"),
+    ],
+    presence: { sales: at("meeting", "วางแผนแคมเปญ", "🤩"), ops: at("server", "ดูกราฟโหลด", "😮‍💨") },
+    prompt: "11.11 อีก 3 วัน ระบบยังไม่พร้อม จะเตรียมอะไรก่อน",
+    options: [
+      {
+        label: "เช่าเซิร์ฟเวอร์เพิ่มและทดสอบโหลดให้จบ",
+        effects: { cash: -10, uptime: 10 },
+        reactions: [
+          say("ops", "dev", "รอบนี้ไม่ล่มแน่ (มั้ง) 💪"),
+          say("sales", "general", "เยี่ยม! ยิงแอดเพิ่มเลย{end}"),
+        ],
+      },
+      {
+        label: "ทำห้องรอคิวกับระบบกันบอท ยอมให้ลูกค้ารอนิดหน่อย",
+        effects: { uptime: 6, security: 6, reputation: -3 },
+        reactions: [
+          say("sec", "dev", "บอทหายไปเยอะ{end} บัตรขโมยก็ลองไม่ได้ 🛡️"),
+          say("sales", "dm", "ลูกค้าบ่นว่าต้องรอคิว แต่ก็ยังซื้อ{end}"),
+        ],
+      },
+      {
+        label: "ลุยตามเดิม ยอดขายสำคัญที่สุด",
+        effects: { cash: 12, uptime: -12, reputation: -4 },
+        reactions: [
+          say("ops", "dm", "ถ้าล่มตอนเที่ยงคืน ใครจะตื่นมาช่วย"),
+          say("sales", "general", "ยอดพุ่ง! (ตอนเว็บยังไม่ล่ม) 💰"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "fintech-audit",
+    business: "fintech",
+    lines: [
+      say("pm", "general", "หน่วยงานกำกับแจ้งว่าจะเข้าตรวจระบบสัปดาห์หน้า{end} ขอดูการทบทวนสิทธิ์และบันทึกเหตุการณ์ย้อนหลัง 6 เดือน"),
+      say("sec", "dev", "การทบทวนสิทธิ์รอบล่าสุดคือ... ปีที่แล้ว 😰"),
+      say("dev", "dev", "บัญชี admin ของคนที่ลาออกไปแล้วยังอยู่สามบัญชี"),
+      say("sales", "general", "สัปดาห์หน้ามีเปิดตัวฟีเจอร์โอนเงินต่างประเทศนะ ยกเลิกไม่ได้"),
+      say("sec", "dm", "CEO {I}แนะนำให้หยุดฟีเจอร์ใหม่ไว้ก่อน{end} ถ้าตรวจไม่ผ่าน ผลกระทบหนักกว่ามาก"),
+    ],
+    presence: { sec: at("ceo", "เตรียมเอกสารตรวจ", "😰"), pm: at("meeting", "ทำ checklist", "📋") },
+    prompt: "หน่วยงานกำกับจะเข้าตรวจสัปดาห์หน้า จะเตรียมยังไง",
+    options: [
+      {
+        label: "หยุดฟีเจอร์ใหม่ 2 สัปดาห์ ทุกคนช่วยเตรียมตรวจ",
+        effects: { security: 10, reputation: 4, cash: -8 },
+        reactions: [
+          say("sec", "general", "ลบบัญชีที่ไม่ใช้แล้ว ทบทวนสิทธิ์ครบ{end} 🛡️"),
+          say("sales", "dm", "เลื่อนเปิดตัวแล้ว พาร์ทเนอร์ไม่ค่อยพอใจ"),
+        ],
+      },
+      {
+        label: "จ้างที่ปรึกษาภายนอกช่วยเตรียม",
+        effects: { cash: -14, security: 8 },
+        reactions: [
+          say("pm", "general", "ที่ปรึกษาเริ่มพรุ่งนี้{end} ทุกคนเตรียมตอบคำถามนะ{ask}"),
+          say("dev", "dev", "เขาขอดู log ที่เราไม่เคยเก็บ..."),
+        ],
+      },
+      {
+        label: "ส่งเอกสารเท่าที่มี แล้วเปิดตัวฟีเจอร์ตามแผน",
+        effects: { reputation: -8, security: -4, cash: 4 },
+        reactions: [
+          say("sec", "dm", "{I}ขอบันทึกไว้นะ{ask}ว่าเราเข้าตรวจทั้งที่ยังมีบัญชี admin ค้าง"),
+          say("sales", "general", "ฟีเจอร์ใหม่เปิดแล้ว! 💸"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "logistics-gps",
+    business: "logistics",
+    lines: [
+      say("ops", "dev", "แอปไรเดอร์เวอร์ชันเก่ายังใช้งานอยู่ 40% และยังไม่ได้บังคับอัปเดต"),
+      say("dev", "dev", "เวอร์ชันเก่าเชื่อตำแหน่ง GPS จากเครื่องอย่างเดียว มีกลุ่มใน Facebook สอนใช้แอป GPS ปลอมเพื่อโกงค่ารอบ"),
+      say("sales", "general", "ลูกค้ารายใหญ่ถามว่าทำไมพัสดุขึ้นว่า 'ส่งแล้ว' แต่ยังไม่ถึง"),
+      say("pm", "dm", "ถ้าบังคับอัปเดต ไรเดอร์บางคนมือถือเก่าจะใช้ไม่ได้นะ{ask} {I}กลัวคนไม่พอส่งของ"),
+    ],
+    presence: { dev: at("desk", "ไล่ดูข้อมูล GPS", "🧐"), pm: at("ceo", "กังวลเรื่องไรเดอร์", "😟") },
+    prompt: "ไรเดอร์ใช้ GPS ปลอมโกงค่ารอบผ่านแอปเวอร์ชันเก่า จะทำยังไง",
+    options: [
+      {
+        label: "บังคับอัปเดตแอป และช่วยค่ามือถือให้ไรเดอร์ที่เครื่องเก่า",
+        effects: { security: 8, cash: -8, reputation: 4 },
+        reactions: [
+          say("dev", "dev", "เวอร์ชันใหม่ตรวจ GPS ปลอมได้แล้ว{end}"),
+          say("pm", "general", "ไรเดอร์ส่วนใหญ่โอเค{end} ขอบคุณที่ช่วยค่าเครื่อง"),
+        ],
+      },
+      {
+        label: "ตรวจจับความผิดปกติฝั่งเซิร์ฟเวอร์แทน ไม่บังคับอัปเดต",
+        effects: { security: 5, cash: -5, uptime: -2 },
+        reactions: [
+          say("dev", "dev", "จับได้บางส่วน แต่ยังหลุดอยู่{end}"),
+          say("ops", "dev", "เซิร์ฟเวอร์ทำงานหนักขึ้นนิดหน่อย"),
+        ],
+      },
+      {
+        label: "ปล่อยไว้ก่อน หักเงินเฉพาะคนที่ถูกจับได้",
+        effects: { cash: -6, reputation: -5, morale: 2 },
+        reactions: [
+          say("sales", "dm", "ลูกค้าบ่นเพิ่มอีกสองราย{end}"),
+          say("pm", "general", "{I}จะทำรายชื่อไรเดอร์ที่น่าสงสัยไว้นะ{ask}"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "gamestudio-cheat",
+    business: "gamestudio",
+    lines: [
+      say("sales", "general", "community ระเบิดแล้ว{end} มีคนใช้โปรแกรมโกงเก็บเลเวลอันดับ 1 ทั้งตาราง 😤"),
+      say("dev", "dev", "เซิร์ฟเวอร์เชื่อค่าที่ client ส่งมาทั้งหมด เลยโกงง่ายมาก"),
+      say("intern", "random", "{I}ลองโหลดโปรแกรมโกงมาเทสต์ดู มีไวรัสติดมาด้วย{end} 😅"),
+      say("sec", "random", "{intern}!!! ห้ามโหลดของแบบนั้นลงเครื่องบริษัทนะ{ask} 😱"),
+      say("pm", "dm", "CEO ยอดเติมเงินลดลง 20% ตั้งแต่มีข่าว{end}"),
+    ],
+    presence: { sales: at("desk", "ตอบคอมเมนต์", "😤"), intern: at("desk", "สแกนไวรัส", "😰") },
+    prompt: "ผู้เล่นใช้โปรแกรมโกงเต็มตารางอันดับ จะจัดการยังไง",
+    options: [
+      {
+        label: "ย้ายการตรวจสอบไปฝั่งเซิร์ฟเวอร์และทำระบบ anti-cheat",
+        effects: { reputation: 8, cash: -8, uptime: -3 },
+        reactions: [
+          say("dev", "dev", "เซิร์ฟเวอร์ไม่เชื่อ client แล้ว{end} คนโกงหายไปเยอะ"),
+          say("sales", "general", "community กลับมาคึกคัก{end} 🎮"),
+        ],
+      },
+      {
+        label: "แบนบัญชีที่โกงรอบใหญ่ แล้วประกาศให้ชัด",
+        effects: { reputation: 5, cash: -4 },
+        reactions: [
+          say("sales", "general", "ประกาศแล้ว คนชมเยอะ{end} แต่ก็มีคนสร้างบัญชีใหม่มาโกงอีก"),
+          say("pm", "general", "ยอดเติมเงินฟื้นนิดหน่อย{end}"),
+        ],
+      },
+      {
+        label: "เงียบไว้ ไม่อยากให้เป็นข่าว",
+        effects: { reputation: -8, morale: -3 },
+        reactions: [
+          say("sales", "dm", "{I}ตอบคอมเมนต์ไม่ไหวแล้ว{end} 😩"),
+          say("dev", "dev", "โปรแกรมโกงอัปเดตเวอร์ชันใหม่แล้วด้วย"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "smartfarm-router",
+    business: "smartfarm",
+    lines: [
+      say("ops", "dev", "เราเตอร์ในสวนทุเรียน 40 จุด ยังใช้รหัส admin ค่าเริ่มต้นจากโรงงานทุกตัว"),
+      say("sec", "dev", "เคยมีข่าวบอตเน็ตกวาดเราเตอร์แบบนี้ไปยิงเว็บอื่นนะ{ask} 😰"),
+      say("dev", "dev", "เปลี่ยนผ่านระบบรีโมตได้ แต่ถ้าพลาด เราเตอร์จะดับ ต้องขับรถไปรีเซ็ตเอง"),
+      say("sales", "dm", "ช่วงนี้ใกล้เก็บเกี่ยว ถ้าระบบน้ำดับ เกษตรกรเดือดร้อนแน่{end}"),
+    ],
+    presence: { ops: at("away", "ขับรถไปสวน", "😮‍💨"), sec: at("desk", "สแกนอุปกรณ์", "😰") },
+    prompt: "เราเตอร์ในสวน 40 จุดใช้รหัสค่าเริ่มต้น จะแก้ยังไง",
+    options: [
+      {
+        label: "ส่งทีมไปเปลี่ยนรหัสและอัปเดตทุกจุดด้วยมือ",
+        effects: { security: 12, cash: -8, morale: -5 },
+        reactions: [
+          say("ops", "dm", "ขับรถไปสามจังหวัด แต่เสร็จแล้ว{end}"),
+          say("sec", "general", "เปลี่ยนครบ 40 จุด 🛡️"),
+        ],
+      },
+      {
+        label: "เปลี่ยนผ่านระบบรีโมตทีละชุดเล็กๆ",
+        effects: { security: 8, uptime: -5 },
+        reactions: [
+          say("dev", "dev", "ดับไป 3 ตัว ที่เหลือโอเค{end}"),
+          say("ops", "dev", "พรุ่งนี้ไปรีเซ็ต 3 ตัวนั้น"),
+        ],
+      },
+      {
+        label: "รอรอบบำรุงรักษาหลังเก็บเกี่ยว",
+        effects: { security: -6, reputation: 2 },
+        reactions: [
+          say("sec", "dm", "บอกแล้วนะ{ask}... {I}จะคอยดู traffic แปลกๆ ไว้"),
+          say("sales", "general", "เกษตรกรขอบคุณที่ไม่รบกวนช่วงเก็บเกี่ยว{end}"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "edtech-exam",
+    business: "edtech",
+    lines: [
+      say("pm", "general", "ข้อสอบกลางภาคหลุดไปอยู่ใน TikTok ก่อนวันสอบ{end} 😱"),
+      say("dev", "dev", "ไฟล์ข้อสอบอยู่ในโฟลเดอร์ที่แชร์ลิงก์แบบ 'ทุกคนที่มีลิงก์' ไว้"),
+      say("sec", "dev", "เรามีข้อมูลนักเรียนที่ยังไม่บรรลุนิติภาวะด้วยนะ{ask} ต้องเช็คว่าโฟลเดอร์อื่นแชร์แบบนี้อีกไหม"),
+      say("sales", "dm", "โรงเรียนพาร์ทเนอร์โทรมาถามแล้ว{end} ต้องรีบตอบ"),
+    ],
+    presence: { pm: at("ceo", "รายงานข้อสอบหลุด", "😱"), sec: at("desk", "ไล่ดูไฟล์แชร์", "😰") },
+    prompt: "ข้อสอบหลุดเพราะลิงก์แชร์แบบสาธารณะ จะทำยังไง",
+    options: [
+      {
+        label: "เลื่อนสอบ ออกข้อสอบใหม่ และไล่ปิดลิงก์สาธารณะทั้งหมด",
+        effects: { security: 8, morale: -6, reputation: 4 },
+        reactions: [
+          say("pm", "general", "ครูออกข้อสอบใหม่ทั้งคืน{end} แต่เสร็จแล้ว"),
+          say("sec", "general", "ปิดลิงก์สาธารณะไปอีก 37 โฟลเดอร์{end} 🛡️"),
+        ],
+      },
+      {
+        label: "สอบตามกำหนด แต่สลับข้อและตัวเลือก",
+        effects: { reputation: -4, morale: 2 },
+        reactions: [
+          say("sales", "dm", "โรงเรียนยอมรับได้ แต่ยังกังวลอยู่{end}"),
+          say("dev", "dev", "สคริปต์สลับข้อเสร็จแล้ว"),
+        ],
+      },
+      {
+        label: "ตั้งนโยบายแชร์ไฟล์ใหม่ทั้งองค์กร และอบรมทุกคน",
+        effects: { security: 10, cash: -4, morale: -3 },
+        reactions: [
+          say("sec", "general", "ต่อไปไฟล์แชร์ได้เฉพาะในโดเมนบริษัท{end}"),
+          say("pm", "general", "ครูบางคนบ่นว่าแชร์ให้นักเรียนยากขึ้น{end}"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "hotel-network",
+    business: "hotel",
+    lines: [
+      say("ops", "dev", "Wi-Fi แขกกับเครื่อง front desk อยู่ในเครือข่ายเดียวกัน แขกห้อง 302 สแกนเจอเครื่องพิมพ์ใบเสร็จเรา"),
+      say("sec", "dev", "ถ้าแขกเห็นเครื่องพิมพ์ได้ ก็อาจเห็นระบบจองได้เหมือนกันนะ{ask} 😰"),
+      say("sales", "general", "ไฮซีซั่นห้องเต็มทุกคืน{end} ระบบจองล่มไม่ได้เด็ดขาด"),
+      say("pm", "dm", "เมื่อวานมีแขกโดน overbook สองห้อง {I}ต้องชดเชยไปแล้ว{end}"),
+    ],
+    presence: { ops: at("server", "ไล่สาย LAN", "😵"), sales: at("desk", "ดูยอดจอง", "🤩") },
+    prompt: "Wi-Fi แขกกับระบบโรงแรมอยู่เครือข่ายเดียวกัน ช่วงไฮซีซั่น จะทำยังไง",
+    options: [
+      {
+        label: "แยกเครือข่ายแขกกับระบบโรงแรมทันที",
+        effects: { security: 10, cash: -6, uptime: -3 },
+        reactions: [
+          say("ops", "dev", "แยกเสร็จตอนตีสอง ไม่มีแขกรู้ตัว"),
+          say("sec", "general", "แขกเห็นแค่อินเทอร์เน็ตแล้ว{end} 🛡️"),
+        ],
+      },
+      {
+        label: "อัปเกรดระบบจองก่อน กัน overbook",
+        effects: { uptime: 8, cash: -10, reputation: 4 },
+        reactions: [
+          say("pm", "general", "ไม่มี overbook อีกเลย{end}"),
+          say("sec", "dm", "แต่เครือข่ายยังปนกันอยู่นะ{ask}"),
+        ],
+      },
+      {
+        label: "รอหลังไฮซีซั่นค่อยแก้",
+        effects: { security: -6, cash: 4 },
+        reactions: [
+          say("sales", "general", "ยอดเต็ม! ไม่มีอะไรสะดุด{end} 💰"),
+          say("sec", "dm", "{I}จะคอยดู log ทุกคืนจนกว่าจะแยกเครือข่าย"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "restaurant-pos",
+    business: "restaurant",
+    lines: [
+      say("ops", "dev", "แท็บเล็ต POS ทุกสาขาต่อ Wi-Fi เดียวกับลูกค้า รหัส Wi-Fi แปะอยู่บนโต๊ะ"),
+      say("sec", "dev", "ระบบรับบัตรอยู่ในเครือข่ายเดียวกับลูกค้าแบบนี้ เสี่ยงโดนดักข้อมูลบัตรนะ{ask} 😰"),
+      say("sales", "general", "สาขาใหม่เปิดสุดสัปดาห์นี้{end} ทุกอย่างต้องพร้อม"),
+      say("pm", "dm", "ผู้จัดการสาขาขอให้ Wi-Fi ลูกค้าแรงขึ้นด้วย {I}ส่งเรื่องมาให้ CEO ตัดสินใจ{end}"),
+    ],
+    presence: { ops: at("away", "ไปติดตั้งสาขาใหม่", "😮‍💨"), sec: at("desk", "วาดผังเครือข่าย", "😰") },
+    prompt: "POS กับลูกค้าใช้ Wi-Fi เดียวกันทุกสาขา จะแก้ยังไง",
+    options: [
+      {
+        label: "แยก Wi-Fi สำหรับ POS ทุกสาขา",
+        effects: { security: 10, cash: -8 },
+        reactions: [
+          say("ops", "dev", "ต้องซื้อ access point เพิ่มทุกสาขา แต่เสร็จแล้ว"),
+          say("sec", "general", "ระบบรับบัตรแยกจากลูกค้าแล้ว{end} 🛡️"),
+        ],
+      },
+      {
+        label: "เปลี่ยนรหัส Wi-Fi ทุกสัปดาห์",
+        effects: { security: 3, morale: -4 },
+        reactions: [
+          say("pm", "general", "พนักงานหน้าร้านบ่นว่าต้องคอยบอกรหัสใหม่ลูกค้า{end}"),
+          say("sec", "dm", "ช่วยได้นิดเดียวนะ{ask}"),
+        ],
+      },
+      {
+        label: "ปล่อยไว้ก่อน เน้นเปิดสาขาใหม่",
+        effects: { security: -6, reputation: 3 },
+        reactions: [
+          say("sales", "general", "สาขาใหม่เปิดสวย! คิวยาวมาก{end} 🎉"),
+          say("sec", "dm", "บอกแล้วนะ{ask}..."),
+        ],
+      },
+    ],
+  },
+  {
+    id: "media-breaking",
+    business: "media",
+    lines: [
+      say("pm", "general", "ข่าวด่วน! คนเข้าเว็บพร้อมกันมากกว่าปกติ 50 เท่า{end}"),
+      say("ops", "dev", "เว็บเริ่มช้า ฐานข้อมูลใกล้เต็ม"),
+      say("sec", "dev", "ตอนเดียวกันมีคนพยายามเดารหัสบัญชีบรรณาธิการหลายร้อยครั้ง{end} 😰"),
+      say("sales", "dm", "ช่วงนี้รายได้โฆษณาดีที่สุดของปี อย่าให้เว็บล่มนะ{ask}"),
+    ],
+    presence: { ops: at("server", "เพิ่มเครื่อง", "😵"), pm: at("desk", "เขียนข่าวด่วน", "😤") },
+    prompt: "ข่าวด่วนทำคนเข้าเว็บพุ่ง และมีคนเดารหัสบัญชีบรรณาธิการ จะทำยังไง",
+    options: [
+      {
+        label: "เปิด cache หน้าข่าว และบังคับ MFA ทุกบัญชีบรรณาธิการ",
+        effects: { uptime: 6, security: 8, cash: -6 },
+        reactions: [
+          say("ops", "dev", "cache ช่วยได้เยอะ เว็บกลับมาเร็วแล้ว"),
+          say("sec", "general", "การเดารหัสล้มเหลวทุกครั้ง{end} 🛡️"),
+        ],
+      },
+      {
+        label: "ขึ้นหน้าเว็บแบบเบาชั่วคราว ตัดโฆษณาบางส่วน",
+        effects: { uptime: 8, cash: -4, reputation: 2 },
+        reactions: [
+          say("sales", "dm", "รายได้หายไปนิดหน่อย แต่เว็บไม่ล่ม{end}"),
+          say("pm", "general", "ผู้อ่านชมว่าเว็บโหลดเร็ว{end}"),
+        ],
+      },
+      {
+        label: "ลุยต่อ เก็บรายได้โฆษณาให้เต็มที่",
+        effects: { cash: 8, uptime: -10, security: -4 },
+        reactions: [
+          say("ops", "dm", "เว็บล่มไป 15 นาที กำลังกู้"),
+          say("sales", "general", "รายได้วันนี้ทำสถิติ! (ก่อนล่ม) 💰"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "accounting-season",
+    business: "accounting",
+    lines: [
+      say("pm", "general", "ช่วงยื่นภาษีแล้ว{end} ลูกค้าส่งงบการเงินทางอีเมลวันละหลายร้อยไฟล์"),
+      say("sec", "dev", "เมื่อเช้ามีอีเมลปลอมแอบอ้างเป็นกรมสรรพากร ขอให้กดลิงก์ยืนยันข้อมูล{end} 😰"),
+      say("ops", "dev", "กล่องอีเมลเต็มทุกวัน backup ก็ช้าลงมาก"),
+      say("sales", "dm", "ลูกค้าบอกว่าระบบส่งไฟล์ของเราใช้ยาก เลยส่งทางอีเมลแทน{end}"),
+    ],
+    presence: { pm: at("desk", "ปิดงบลูกค้า", "😵"), sec: at("desk", "บล็อกอีเมลปลอม", "😰") },
+    prompt: "ช่วงยื่นภาษี ไฟล์ลูกค้าไหลเข้าทางอีเมลและมีอีเมลปลอมระบาด จะทำยังไง",
+    options: [
+      {
+        label: "ทำระบบรับไฟล์ที่เข้ารหัสและใช้ง่าย แล้วแจ้งลูกค้า",
+        effects: { security: 10, cash: -6, morale: -2 },
+        reactions: [
+          say("sec", "general", "ไฟล์ลูกค้าไม่ต้องผ่านอีเมลแล้ว{end} 🛡️"),
+          say("sales", "general", "ลูกค้าบอกว่าใช้ง่ายกว่าเดิม{end}"),
+        ],
+      },
+      {
+        label: "อบรมด่วนเรื่องอีเมลปลอม และตั้งกฎกรองอีเมล",
+        effects: { security: 6, morale: -3 },
+        reactions: [
+          say("sec", "general", "บล็อกอีเมลปลอมได้อีก 120 ฉบับวันนี้{end}"),
+          say("pm", "general", "อบรม 30 นาทีในช่วงนี้ก็หนักอยู่นะ{ask}"),
+        ],
+      },
+      {
+        label: "ใช้วิธีเดิมไปก่อน ช่วงนี้ยุ่งมาก",
+        effects: { security: -6, morale: 3 },
+        reactions: [
+          say("pm", "general", "ขอบคุณ{end} ทุกคนโฟกัสปิดงบได้เต็มที่"),
+          say("sec", "dm", "{I}ขอบันทึกไว้นะ{ask}ว่าเรารับไฟล์การเงินทางอีเมลต่อ"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "fitness-data",
+    business: "fitness",
+    lines: [
+      say("sales", "general", "บริษัทหนึ่งเสนอเงินก้อนใหญ่ขอซื้อข้อมูลการออกกำลังกายและสุขภาพของผู้ใช้เรา{end} 💰"),
+      say("sec", "dev", "ข้อมูลสุขภาพเป็นข้อมูลอ่อนไหวนะ{ask} ต้องมีความยินยอมชัดเจน"),
+      say("dev", "dev", "ทำให้ไม่ระบุตัวตนได้ แต่ข้อมูลตำแหน่งวิ่งตอนเช้าก็ย้อนกลับไปหาบ้านคนได้อยู่ดี"),
+      say("pm", "dm", "ถ้าผู้ใช้รู้ทีหลัง {I}ว่าแบรนด์เราเสียหายหนัก{end}"),
+    ],
+    presence: { sales: at("ceo", "นำเสนอดีลขายข้อมูล", "🤩"), sec: at("desk", "อ่านข้อตกลง", "😰") },
+    prompt: "มีบริษัทขอซื้อข้อมูลสุขภาพผู้ใช้ จะตอบยังไง",
+    options: [
+      {
+        label: "ปฏิเสธ และประกาศว่าเราไม่ขายข้อมูลผู้ใช้",
+        effects: { reputation: 8, cash: -2 },
+        reactions: [
+          say("pm", "general", "ผู้ใช้ชมกันเยอะเลย{end}"),
+          say("sales", "dm", "เงินก้อนนั้นน่าเสียดายนะ{ask}"),
+        ],
+      },
+      {
+        label: "ขายเฉพาะข้อมูลสรุปภาพรวม และขอความยินยอมก่อน",
+        effects: { cash: 8, reputation: -2, security: -2 },
+        reactions: [
+          say("sec", "dev", "ตัดข้อมูลตำแหน่งออกทั้งหมดแล้ว{end}"),
+          say("sales", "general", "ได้เงินน้อยลงแต่ก็ยังดี{end} 💼"),
+        ],
+      },
+      {
+        label: "ขายตามที่เขาขอ",
+        effects: { cash: 15, reputation: -12, security: -4 },
+        reactions: [
+          say("sec", "dm", "{I}ไม่เห็นด้วยอย่างแรง{end} ขอบันทึกไว้"),
+          say("sales", "general", "เงินเข้าแล้ว! 💰"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "condo-keycard",
+    business: "condo",
+    lines: [
+      say("sales", "general", "ลูกบ้านแจ้งว่ามีคนรับก๊อปคีย์การ์ดคอนโดเราขายใน Facebook ใบละ 200 บาท{end}"),
+      say("ops", "dev", "การ์ดรุ่นที่ใช้อยู่ไม่มีการเข้ารหัส ก๊อปได้ด้วยเครื่องราคาถูก"),
+      say("sec", "dev", "ถ้าก๊อปได้ ใครก็เข้าลิฟต์กับที่จอดรถได้นะ{ask} 😰"),
+      say("pm", "dm", "เปลี่ยนการ์ดทั้งตึกต้องใช้งบเยอะ{end} {I}ต้องขออนุมัติ"),
+    ],
+    presence: { sec: at("away", "เดินตรวจลิฟต์", "😰"), pm: at("ceo", "ขอนุมัติงบ", "😟") },
+    prompt: "คีย์การ์ดคอนโดถูกก๊อปขายในโซเชียล จะทำยังไง",
+    options: [
+      {
+        label: "เปลี่ยนเป็นคีย์การ์ดรุ่นที่เข้ารหัสทั้งตึก",
+        effects: { security: 10, cash: -12 },
+        reactions: [
+          say("ops", "dev", "แจกการ์ดใหม่ครบทุกห้องแล้ว"),
+          say("sales", "general", "ลูกบ้านรู้สึกปลอดภัยขึ้น{end}"),
+        ],
+      },
+      {
+        label: "เพิ่มการตรวจ CCTV และให้ รปภ. เช็คที่ลิฟต์",
+        effects: { security: 4, cash: -5, morale: -2 },
+        reactions: [
+          say("sec", "dev", "จับคนใช้การ์ดก๊อปได้หนึ่งราย{end}"),
+          say("pm", "general", "รปภ. ขอเพิ่มคนอีกหนึ่งกะ{end}"),
+        ],
+      },
+      {
+        label: "ประกาศให้ลูกบ้านระวัง และอย่าให้ใครยืมการ์ด",
+        effects: { reputation: -4, cash: 1 },
+        reactions: [
+          say("sales", "dm", "ลูกบ้านบางคนถามว่าแค่ประกาศเหรอ{end}"),
+          say("sec", "dm", "บอกแล้วนะ{ask}..."),
+        ],
+      },
+    ],
+  },
+  {
+    id: "factory-remote",
+    business: "factory",
+    lines: [
+      say("ops", "dev", "ผู้ขายเครื่องจักรขอรีโมตเข้า PLC ของไลน์ผลิตได้ตลอดเวลา ตอนนี้ใช้โปรแกรมรีโมตรหัสเดิมมาสามปี"),
+      say("sec", "dev", "เครือข่ายโรงงานกับเครือข่ายออฟฟิศยังเชื่อมกันอยู่ด้วยนะ{ask} ถ้าออฟฟิศโดน ไลน์ผลิตก็โดน 😱"),
+      say("sales", "general", "ลูกค้าค่ายรถสั่งของเพิ่ม ไลน์ผลิตหยุดไม่ได้เลย{end}"),
+      say("pm", "dm", "ถ้าไลน์หยุดชั่วโมงเดียว เสียหายหลายแสน{end} {I}ต้องคิดให้ดี"),
+    ],
+    presence: { ops: at("server", "ตรวจเครือข่ายโรงงาน", "😬"), pm: at("meeting", "คุยกับผู้ขาย", "😟") },
+    prompt: "ผู้ขายขอรีโมตเข้าไลน์ผลิตตลอดเวลา และเครือข่ายโรงงานปนกับออฟฟิศ จะทำยังไง",
+    options: [
+      {
+        label: "ให้เข้าผ่าน jump server พร้อม MFA และเปิดเฉพาะตอนนัด",
+        effects: { security: 10, uptime: -3 },
+        reactions: [
+          say("sec", "general", "ทุกการเข้าถึงมีบันทึกแล้ว{end} 🛡️"),
+          say("ops", "dev", "ผู้ขายบ่นนิดหน่อยแต่ยอม"),
+        ],
+      },
+      {
+        label: "แยกเครือข่ายโรงงานออกจากออฟฟิศทั้งหมด",
+        effects: { security: 12, cash: -14, uptime: -4 },
+        reactions: [
+          say("ops", "dev", "หยุดไลน์ช่วงกลางคืนสองคืน แต่แยกเสร็จแล้ว"),
+          say("pm", "general", "งบเยอะ แต่ประกันภัยไซเบอร์ลดเบี้ยให้{end}"),
+        ],
+      },
+      {
+        label: "ให้ตามที่ผู้ขายขอ เพื่อให้แก้ปัญหาได้ไว",
+        effects: { uptime: 6, security: -8 },
+        reactions: [
+          say("sales", "general", "ไลน์ไม่สะดุดเลย{end} 💼"),
+          say("sec", "dm", "{I}ขอบันทึกไว้นะ{ask}ว่ารหัสรีโมตสามปียังไม่เปลี่ยน"),
+        ],
+      },
+    ],
+  },
+  {
+    id: "insurance-claims",
+    business: "insurance",
+    lines: [
+      say("sales", "general", "ลูกค้าคนหนึ่งโพสต์ว่าเปิดลิงก์รูปเคลมของตัวเอง แล้วเปลี่ยนเลขท้ายลิงก์ก็เห็นรูปบัตรประชาชนของคนอื่น{end} 😱"),
+      say("dev", "dev", "ที่เก็บไฟล์เคลมเปิดลิงก์แบบสาธารณะ และตั้งชื่อไฟล์เรียงเลข"),
+      say("sec", "dev", "ต้องปิดก่อน แล้วดู log ว่ามีใครเข้าถึงไปแล้วบ้าง{end}"),
+      say("pm", "dm", "เรื่องนี้น่าจะต้องคุยกับฝ่ายกฎหมายเรื่องการแจ้งลูกค้าด้วยนะ{ask}"),
+    ],
+    presence: { dev: at("desk", "ปิดลิงก์สาธารณะ", "😬"), sec: at("server", "ไล่ดู log", "😱") },
+    prompt: "รูปบัตรประชาชนลูกค้าในระบบเคลมเปิดดูได้จากลิงก์สาธารณะ จะทำยังไง",
+    options: [
+      {
+        label: "ปิดทันที ตรวจ log และแจ้งลูกค้าที่อาจได้รับผลกระทบ",
+        effects: { security: 8, reputation: 4, cash: -8 },
+        reactions: [
+          say("sec", "general", "ปิดแล้ว log บอกว่ามีคนเข้าถึงไฟล์คนอื่น 12 ไฟล์{end}"),
+          say("pm", "general", "ฝ่ายกฎหมายช่วยร่างอีเมลแจ้งลูกค้าแล้ว{end}"),
+        ],
+      },
+      {
+        label: "ปิดทันที แก้ระบบให้ลิงก์หมดอายุ แล้วค่อยประเมินว่าจะแจ้งใคร",
+        effects: { security: 10, uptime: -3 },
+        reactions: [
+          say("dev", "dev", "ลิงก์ใหม่หมดอายุใน 15 นาทีแล้ว"),
+          say("pm", "dm", "อย่าลืมเรื่องการแจ้งลูกค้านะ{ask}"),
+        ],
+      },
+      {
+        label: "ปิดเงียบๆ แล้วตอบโพสต์ว่าเป็นความเข้าใจผิด",
+        effects: { security: 4, reputation: -10 },
+        reactions: [
+          say("sales", "dm", "ลูกค้าคนนั้นแคปหน้าจอไว้แล้ว{end} 😰"),
+          say("sec", "dm", "{I}ไม่เห็นด้วยนะ{ask} ขอบันทึกไว้"),
+        ],
+      },
+    ],
+  },
+];
+
 // How many quiet scenes must pass before one can come back.
 export const QUIET_REPEAT_GAP = Math.floor(QUIET_SCRIPTS.length / 2);
+// How often a quiet day uses the business's own scene while it is fresh.
+const BUSINESS_SCENE_CHANCE = 0.4;
 
 // Roles a script cannot do without: every author of the opening lines and every {role} it names.
 function requiredRoles(script: ScriptedScene): Set<RoleKey> {
@@ -551,9 +1170,12 @@ function requiredRoles(script: ScriptedScene): Set<RoleKey> {
 }
 
 // Picks a quiet scene the company has not seen recently and has the people for.
-export function pickQuietScript(recent: string[], staff: Employee[]): QuietScript {
-  const castable = QUIET_SCRIPTS.filter((s) => [...requiredRoles(s)].every((r) => holder(staff, r)));
-  const choices = castable.length ? castable : QUIET_SCRIPTS;
+export function pickQuietScript(recent: string[], staff: Employee[], business: string): QuietScript {
+  const castable = (s: QuietScript) => [...requiredRoles(s)].every((r) => holder(staff, r));
+  const own = BUSINESS_SCRIPTS.filter((s) => s.business === business && castable(s) && !recent.includes(s.id));
+  if (own.length && Math.random() < BUSINESS_SCENE_CHANCE) return own[Math.floor(Math.random() * own.length)];
+  const generic = QUIET_SCRIPTS.filter(castable);
+  const choices = generic.length ? generic : QUIET_SCRIPTS;
   const fresh = choices.filter((s) => !recent.includes(s.id));
   const pool = fresh.length ? fresh : choices;
   return pool[Math.floor(Math.random() * pool.length)];
@@ -646,14 +1268,15 @@ const WELCOME_LINES: Line[] = [
   say("sec", "dev", "ขอเตือนไว้ก่อนเลยนะ{ask} ระบบเรายังไม่ได้ patch หลายตัว 🫠"),
 ];
 
-export function welcomePosts(staff: Employee[]): DraftMessage[] {
+export function welcomePosts(staff: Employee[], company: { name: string; business: string }): DraftMessage[] {
   return [
     {
       channel: "general",
       author: "system",
       kind: "system",
       text:
-        "👋 ยินดีต้อนรับ CEO คนใหม่! กด 'เหตุการณ์ถัดไป' เพื่อเริ่มวันทำงาน\n" +
+        `👋 ยินดีต้อนรับ CEO คนใหม่ของ ${company.name} (${company.business})! ออฟฟิศเริ่มทำงานแล้ว\n` +
+        "เรื่องที่ต้องตัดสินใจจะเข้ามาใน 📥 Inbox (ตอบไม่ทันมีผลกระทบ) และพิมพ์คุยกับพนักงานได้ทุกคน\n" +
         "ข่าวใน #security-alerts เป็นข่าวจริงจาก CISA KEV (ผ่าน NVD) ส่วนบริษัทและพนักงานเป็นเรื่องสมมติ",
     },
     ...castLines(WELCOME_LINES, staff),

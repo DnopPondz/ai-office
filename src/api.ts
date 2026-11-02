@@ -21,10 +21,14 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return data;
 }
 
+// Every call returns the game state with only the messages newer than `since`.
 export const api = {
   login: (pin: string) => call<{ ok: true }>("/api/login", { pin }),
-  state: () => call<GameState>("/api/state"),
-  advance: () => call<GameState>("/api/advance", {}),
-  decide: (optionId: string) => call<GameState>("/api/decide", { optionId }),
+  state: (since: number) => call<GameState>(`/api/state?since=${since}`),
+  chat: (channel: string, text: string, since: number) => call<GameState>(`/api/chat?since=${since}`, { channel, text }),
+  answer: (ticketId: string, choice: { optionId?: string; text?: string }, since: number) =>
+    call<GameState>(`/api/answer?since=${since}`, { ticketId, ...choice }),
+  team: (action: "raise" | "promote" | "fire" | "hire", target: { employeeId?: string; role?: string }, since: number) =>
+    call<GameState>(`/api/team?since=${since}`, { action, ...target }),
   reset: () => call<GameState>("/api/reset", {}),
 };

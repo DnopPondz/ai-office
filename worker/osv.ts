@@ -1,7 +1,8 @@
 import type { DepVuln } from "../shared/types";
-import { DEPENDENCIES, truncate } from "./game";
+import { ALL_DEPENDENCIES as DEPENDENCIES, PACKAGE_VERSIONS } from "./business";
+import { truncate } from "./game";
 
-// Real vulnerability data for the fictional company's pinned npm dependencies, from OSV.dev.
+// Real vulnerability data for the pinned npm dependencies of every business type, from OSV.dev.
 const OSV_API = "https://api.osv.dev/v1";
 const LIST_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 // The free plan allows 50 external subrequests per invocation; details are filled in batches.
@@ -78,7 +79,8 @@ function pickRange(vuln: OsvVuln, pkg: string, version: string): { introduced: s
 
 export async function refreshDeps(env: Env): Promise<void> {
   const now = Date.now();
-  const listed = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'deps_listed_at'`).first<{ value: string }>();
+  // Renamed when the package list grows, so new packages are queried right away.
+  const listed = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'deps_listed_at_v2'`).first<{ value: string }>();
 
   if (!listed || now - Number(listed.value) > LIST_STALE_AFTER_MS) {
     const res = await fetch(`${OSV_API}/querybatch`, {
@@ -107,7 +109,7 @@ export async function refreshDeps(env: Env): Promise<void> {
     });
     statements.push(
       env.DB.prepare(
-        `INSERT INTO meta (key, value) VALUES ('deps_listed_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        `INSERT INTO meta (key, value) VALUES ('deps_listed_at_v2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
       ).bind(String(now)),
     );
     await env.DB.batch(statements);
@@ -126,7 +128,7 @@ export async function refreshDeps(env: Env): Promise<void> {
   );
   const statements = details.flatMap((d) => {
     if (!d) return [];
-    const pinned = DEPENDENCIES.find((x) => x.name === d.p.package)?.version ?? "0.0.0";
+    const pinned = PACKAGE_VERSIONS[d.p.package] ?? "0.0.0";
     const range = pickRange(d.v, d.p.package, pinned);
     const summary = d.v.summary ?? (d.v.details && truncate(d.v.details, 200)) ?? d.v.id;
     return [

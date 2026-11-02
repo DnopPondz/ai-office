@@ -46,6 +46,9 @@ export interface PublicEmployee {
   role: string;
   emoji: string;
   avatar?: AvatarSpec;
+  salary?: number; // baht per month
+  morale?: number; // 0-100, this person only
+  level?: number; // 1 junior, 2 senior, 3 lead
 }
 
 // The job an employee fills; scripted scenes and pooled scenes are written against these.
@@ -64,6 +67,9 @@ export interface Employee extends PublicEmployee {
   secretGoal: string;
   speech: Speech;
   avatar: AvatarSpec;
+  salary: number;
+  morale: number;
+  level: number;
 }
 
 // Which part of the fictional company's infrastructure a component belongs to;
@@ -92,7 +98,8 @@ export interface DepVuln {
   url: string;
 }
 
-export type MessageKind = "chat" | "bot" | "system" | "diff";
+// "ticket" messages announce a ticket in a channel; their link is "ticket:<id>".
+export type MessageKind = "chat" | "bot" | "system" | "diff" | "ticket";
 
 export interface ChatMessage {
   id: number;
@@ -111,11 +118,22 @@ export interface DecisionOption {
   patches: boolean;
 }
 
-export interface Decision {
+// Something waiting for the CEO: an email ticket or a personal request in a DM. It has a
+// deadline in game time; ignoring it has consequences.
+export type TicketStatus = "open" | "thinking" | "done" | "expired";
+
+export interface PublicTicket {
   id: string;
-  prompt: string;
+  kind: "email" | "dm";
+  from: string;
+  subject: string;
+  body: string;
   options: DecisionOption[];
-  newsId: string | null;
+  urgent: boolean;
+  status: TicketStatus;
+  // Game milliseconds left; while the player is online one game ms is one real ms.
+  deadlineIn: number;
+  outcome: string | null;
 }
 
 export interface OpenRisk {
@@ -128,6 +146,8 @@ export interface OpenRisk {
   // Dependency risks only: the package and the first version that fixes it (from OSV).
   package?: string;
   fixedVersion?: string | null;
+  // The CEO let its ticket expire; a breach is more likely.
+  ignored?: boolean;
 }
 
 export interface NewsItem {
@@ -143,15 +163,35 @@ export interface NewsItem {
   url: string;
 }
 
+export interface CompanyInfo {
+  name: string;
+  business: string;
+}
+
+// stats.cash is in baht; the other stats are 0-100.
+export interface MoneyInfo {
+  monthlyRevenue: number;
+  monthlyCost: number;
+  daysToPayday: number;
+}
+
 export interface GameState {
+  // Changes when a new company starts, so the client drops messages it kept from the old one.
+  epoch: string;
   day: number;
+  company: CompanyInfo;
+  money: MoneyInfo;
   stats: Stats;
   employees: PublicEmployee[];
   presence: Record<string, Presence>;
   stack: StackItem[];
   deps: Dependency[];
+  // Only messages newer than the "since" id the client asked for; the client keeps the rest.
   messages: ChatMessage[];
-  decision: Decision | null;
+  tickets: PublicTicket[];
+  // Channels (or "ticket:<id>") where someone is composing a reply right now.
+  typing: string[];
+  maxStaff: number;
   openRisks: OpenRisk[];
   // Share of today's account-wide AI budget left. At 0 the game keeps going on pooled and scripted scenes.
   aiPercentLeft: number;

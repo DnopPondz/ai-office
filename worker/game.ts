@@ -1,6 +1,5 @@
 import type {
   DecisionOption,
-  Dependency,
   DepVuln,
   Employee,
   MessageKind,
@@ -10,51 +9,18 @@ import type {
   Presence,
   RoleKey,
   StackItem,
-  StackLayer,
   StatKey,
   Stats,
 } from "../shared/types";
 import { OFFICE_SPOTS, STAT_KEYS, STAT_LABELS } from "../shared/types";
 import { AiBudgetError, hasAiBudget, markBudgetExhausted, recordNeurons } from "./budget";
+import { cashUnit as cashUnitOf, formatBaht, type Business, type StackDef } from "./business";
 import { holder, speechNote } from "./roster";
 
 export const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 // Workers AI price for MODEL (developers.cloudflare.com/workers-ai/platform/pricing).
 const NEURONS_PER_M_INPUT = 9091;
 const NEURONS_PER_M_OUTPUT = 27273;
-
-export const INITIAL_STATS: Stats = { cash: 70, morale: 65, security: 50, reputation: 60, uptime: 90 };
-
-// The fictional company's systems. KEV news is matched against these keywords by
-// product name only; npm dependencies below are checked by exact version via OSV.
-export const STACK: (StackItem & { keywords: string[] })[] = [
-  { name: "Next.js / React", layer: "app", keywords: ["next.js", "vercel:next", "react server", "facebook:react", "meta:react"] },
-  { name: "Node.js", layer: "app", keywords: ["node.js", "nodejs:node"] },
-  { name: "nginx", layer: "edge", keywords: ["nginx"] },
-  { name: "Ubuntu Linux", layer: "host", keywords: ["linux kernel", "linux:linux_kernel", "canonical:", "ubuntu"] },
-  { name: "PostgreSQL", layer: "data", keywords: ["postgresql"] },
-  { name: "WordPress (เว็บการตลาด)", layer: "app", keywords: ["wordpress"] },
-  { name: "GitHub", layer: "ci", keywords: ["github"] },
-  { name: "Redis", layer: "data", keywords: ["redis"] },
-  { name: "OpenSSH", layer: "host", keywords: ["openssh"] },
-  { name: "Chrome (เครื่องพนักงาน)", layer: "endpoint", keywords: ["chrome", "chromium"] },
-  { name: "Windows (เครื่องพนักงาน)", layer: "endpoint", keywords: ["microsoft windows", "microsoft:windows"] },
-  { name: "Fortinet VPN", layer: "edge", keywords: ["fortinet", "fortios"] },
-];
-
-// package.json of the fictional web app: deliberately old pins, checked against OSV.dev.
-export const DEPENDENCIES: Dependency[] = [
-  { name: "next", version: "14.2.10" },
-  { name: "express", version: "4.18.2" },
-  { name: "axios", version: "1.6.0" },
-  { name: "lodash", version: "4.17.20" },
-  { name: "jsonwebtoken", version: "8.5.1" },
-  { name: "ws", version: "8.11.0" },
-];
-
-export function defaultDeps(): Record<string, string> {
-  return Object.fromEntries(DEPENDENCIES.map((d) => [d.name, d.version]));
-}
 
 export const REGRESSION_CHANCE = 0.3;
 export const REGRESSION_EFFECTS: Partial<Stats> = { uptime: -12, reputation: -5, morale: -5 };
@@ -79,6 +45,9 @@ export type SceneEvent =
 export interface SceneInput {
   event: SceneEvent;
   staff: Employee[];
+  business: Business;
+  companyName?: string;
+  money?: { revenue: number; cost: number };
   day?: number;
   stats?: Stats;
   recent?: string[];
@@ -133,29 +102,31 @@ export function eventPresence(event: SceneEvent, previous: PresenceMap, staff: E
 
 export const CHANNELS = ["general", "dev", "security-alerts", "random"];
 
-export function matchStackItems(news: NewsItem): StackItem[] {
+export function matchStackItems(news: NewsItem, stack: StackDef[]): StackItem[] {
   const haystack = `${news.name} ${news.products.join(" ")}`.toLowerCase();
-  return STACK.filter((s) => s.keywords.some((k) => haystack.includes(k))).map(({ name, layer }) => ({ name, layer }));
+  return stack.filter((s) => s.keywords.some((k) => haystack.includes(k))).map(({ name, layer }) => ({ name, layer }));
 }
 
-export function matchStack(news: NewsItem): string[] {
-  return matchStackItems(news).map((s) => s.name);
+export function matchStack(news: NewsItem, stack: StackDef[]): string[] {
+  return matchStackItems(news, stack).map((s) => s.name);
 }
 
-export function layerOf(names: string[]): StackLayer {
-  return STACK.find((s) => names.includes(s.name))?.layer ?? "edge";
-}
-
-export function applyEffects(stats: Stats, effects: Partial<Stats>): void {
+// Effects are points; cash points are worth cashUnit baht each, the other stats stay 0-100.
+export function applyEffects(stats: Stats, effects: Partial<Stats>, cashUnit: number): void {
   for (const key of STAT_KEYS) {
     const delta = effects[key];
-    if (typeof delta === "number") stats[key] = clamp(stats[key] + delta, 0, 100);
+    if (typeof delta !== "number") continue;
+    stats[key] = key === "cash" ? stats.cash + delta * cashUnit : clamp(stats[key] + delta, 0, 100);
   }
 }
 
-export function formatEffects(effects: Partial<Stats>): string {
+export function formatEffects(effects: Partial<Stats>, cashUnit: number): string {
   return STAT_KEYS.filter((k) => effects[k])
-    .map((k) => `${STAT_LABELS[k]} ${effects[k]! > 0 ? "+" : ""}${effects[k]}`)
+    .map((k) => {
+      const v = effects[k]!;
+      const sign = v > 0 ? "+" : "-";
+      return k === "cash" ? `${STAT_LABELS[k]} ${sign}${formatBaht(Math.abs(v) * cashUnit)}` : `${STAT_LABELS[k]} ${v > 0 ? "+" : ""}${v}`;
+    })
     .join(" · ");
 }
 
@@ -220,13 +191,13 @@ export function secBotDepPosts(vuln: DepVuln, current: string, prNumber: number)
   return posts;
 }
 
-export function regressionPosts(pkg: string, version: string): DraftMessage[] {
+export function regressionPosts(pkg: string, version: string, cashUnit: number): DraftMessage[] {
   return [
     {
       channel: "dev",
       author: "system",
       kind: "system",
-      text: `💥 [เหตุการณ์จำลอง] หลังอัปเกรด ${pkg} เป็น ${version} บางหน้าของระบบใช้งานไม่ได้ (breaking change)\n${formatEffects(REGRESSION_EFFECTS)}`,
+      text: `💥 [เหตุการณ์จำลอง] หลังอัปเกรด ${pkg} เป็น ${version} บางหน้าของระบบใช้งานไม่ได้ (breaking change)\n${formatEffects(REGRESSION_EFFECTS, cashUnit)}`,
     },
   ];
 }
@@ -251,8 +222,10 @@ ceo (in the CEO's office), lounge (sofa corner), away (out of the office).
 (incident: server room or meeting; gossip: pantry; asking the CEO for something: ceo; secretly job hunting: away).`;
 
 const SCENE_RULES = `Write 6 to 10 messages across at least 3 channels, including at least one DM to the CEO.
-Then write ONE decision for the CEO: a short Thai question and exactly 3 options.
-Each option has a short Thai label, integer effects between -25 and 25 for any of cash, morale, security, reputation, uptime,
+Then write ONE decision for the CEO: a short Thai question and exactly 3 options. The question is the game's narration,
+not an employee speaking: no polite particles (no ครับ, ค่ะ, คะ).
+Each option has a short Thai label, integer effects between -25 and 25 for any of cash, morale, security, reputation, uptime
+(cash is in cash points, see CASH),
 and "patches": true only if that option actually fixes or mitigates the news risk.
 Options must be real trade-offs; no option is strictly best.
 ${PRESENCE_RULES}`;
@@ -363,14 +336,23 @@ The decision is about people or business (all options "patches": false).`;
 }
 
 function scenePrompt(input: SceneInput): string {
-  const { stats, openRisks, recent } = input;
+  const { stats, openRisks, recent, business, money } = input;
   const risks = openRisks?.length ? openRisks.map((r) => `${r.newsId} (${r.title})`).join("; ") : "none";
+  const unit = cashUnitOf(business);
   return [
+    input.companyName
+      ? `COMPANY: "${input.companyName}", a ${business.pitch}.`
+      : `COMPANY: a ${business.pitch}. Do not invent a company name.`,
     ...(input.day !== undefined ? [`DAY: ${input.day}`] : []),
-    ...(stats ? [`COMPANY STATS (0-100): ${STAT_KEYS.map((k) => `${k}=${stats[k]}`).join(", ")}`] : []),
+    ...(stats
+      ? [`COMPANY STATS (0-100): ${STAT_KEYS.filter((k) => k !== "cash").map((k) => `${k}=${stats[k]}`).join(", ")}`]
+      : []),
+    `CASH: ${stats ? `${Math.round(stats.cash)} THB. ` : ""}One cash point in effects = ${unit} THB.${
+      money ? ` Monthly revenue about ${money.revenue} THB, monthly costs about ${money.cost} THB.` : ""
+    }`,
     "EMPLOYEES:",
     ...staffLines(input.staff),
-    `COMPANY TECH STACK (fictional): ${STACK.map((s) => s.name).join(", ")}`,
+    `COMPANY TECH STACK (fictional): ${business.stack.map((s) => s.name).join(", ")}`,
     ...(openRisks ? [`OPEN UNPATCHED RISKS: ${risks}`] : []),
     ...(recent
       ? ["RECENT CHAT (for continuity):", ...(recent.length ? recent : ["(none yet)"])]
@@ -407,7 +389,7 @@ function staffLines(staff: Employee[]): string[] {
 
 export async function generateAftermath(
   env: Env,
-  input: { staff: Employee[]; prompt: string; chosen: DecisionOption; others: DecisionOption[]; recent: string[] },
+  input: { staff: Employee[]; cashUnit: number; prompt: string; chosen: DecisionOption; others: DecisionOption[]; recent: string[] },
 ): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
   const prompt = [
     "EMPLOYEES:",
@@ -416,7 +398,7 @@ export async function generateAftermath(
     ...input.recent,
     "",
     `THE CEO WAS ASKED: ${input.prompt}`,
-    `THE CEO CHOSE: ${input.chosen.label} (effects: ${formatEffects(input.chosen.effects) || "none"})`,
+    `THE CEO CHOSE: ${input.chosen.label} (effects: ${formatEffects(input.chosen.effects, input.cashUnit) || "none"})`,
     `REJECTED: ${input.others.map((o) => o.label).join(" / ")}`,
     "",
     "Write 3 to 5 short messages reacting to the CEO's decision, true to each personality. Include at least one DM to the CEO. No decision.",
@@ -427,6 +409,126 @@ export async function generateAftermath(
     messages: sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).slice(0, 6),
     presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
   };
+}
+
+export interface ChatContext {
+  staff: Employee[];
+  business: Business;
+  companyName: string;
+  stats: Stats;
+  money: { revenue: number; cost: number };
+  // One line per open ticket, e.g. "ใหม่ (email): patch nginx? 3 min left".
+  tickets: string[];
+  recent: string[];
+}
+
+function contextLines(c: ChatContext): string[] {
+  return [
+    `COMPANY: "${c.companyName}", a ${c.business.pitch}.`,
+    `COMPANY STATS (0-100): ${STAT_KEYS.filter((k) => k !== "cash").map((k) => `${k}=${c.stats[k]}`).join(", ")}`,
+    `CASH: ${Math.round(c.stats.cash)} THB. Monthly revenue about ${c.money.revenue} THB, monthly costs about ${c.money.cost} THB.`,
+    `COMPANY TECH STACK (fictional): ${c.business.stack.map((s) => s.name).join(", ")}`,
+    "EMPLOYEES:",
+    ...staffLines(c.staff),
+    "TICKETS WAITING FOR THE CEO:",
+    ...(c.tickets.length ? c.tickets : ["(none)"]),
+    "RECENT CHAT:",
+    ...(c.recent.length ? c.recent : ["(none yet)"]),
+  ];
+}
+
+// The CEO wrote in a channel or a DM; the relevant employees answer in character.
+export async function generateChatReply(
+  env: Env,
+  input: ChatContext & { channel: string; text: string },
+): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
+  const dmWith = input.channel.startsWith("dm-") ? input.staff.find((e) => `dm-${e.id}` === input.channel) : undefined;
+  const prompt = [
+    ...contextLines(input),
+    "",
+    `THE CEO JUST WROTE IN ${input.channel}: ${input.text}`,
+    "",
+    dmWith
+      ? `This is a private DM, so only ${dmWith.name} (id=${dmWith.id}) answers, in channel "${input.channel}", 1 or 2 messages.`
+      : `Reply in channel "${input.channel}" as 1 to 3 employees who would naturally answer.`,
+    "Answer the CEO's actual question in character and in role: each person knows their own job (security, sales, ops...).",
+    "Use only facts given above; anything else is an opinion or a guess and must sound like one. If they do not know, they say so.",
+    "They may bring up their own waiting tickets or worries. Do not make decisions for the CEO and do not offer options.",
+    PRESENCE_RULES,
+  ].join("\n");
+  const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 600);
+  const messages = sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff)
+    .map((m) => (dmWith ? { ...m, author: dmWith.id, channel: input.channel } : { ...m, channel: m.channel.startsWith("dm-") ? input.channel : m.channel }))
+    .slice(0, 3);
+  return { messages, presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff) };
+}
+
+const INTERPRET_SCHEMA = {
+  type: "object",
+  properties: {
+    choice: { type: "string" },
+    effects: { type: "object", properties: EFFECT_PROPERTIES },
+    patches: { type: "boolean" },
+    reply: { type: "string" },
+  },
+  required: ["choice", "effects", "patches", "reply"],
+};
+
+export interface Interpretation {
+  // An option id, or null for a new answer that matches none of them.
+  optionId: string | null;
+  effects: Partial<Stats>;
+  patches: boolean;
+  reply: string;
+}
+
+// The CEO answered a ticket in their own words: match it to an option, or score it as a new answer.
+export async function interpretReply(
+  env: Env,
+  input: ChatContext & {
+    from: Employee | undefined;
+    subject: string;
+    body: string;
+    options: DecisionOption[];
+    canPatch: boolean;
+    allowCustom: boolean;
+    text: string;
+  },
+): Promise<Interpretation> {
+  const prompt = [
+    ...contextLines(input),
+    "",
+    `TICKET FROM ${input.from ? `${input.from.name} (id=${input.from.id})` : "the company"}: ${input.subject}`,
+    input.body ? `DETAILS: ${input.body}` : "",
+    "OPTIONS:",
+    ...input.options.map((o) => `- ${o.id}: ${o.label} (effects: ${JSON.stringify(o.effects)}${o.patches ? ", fixes the risk" : ""})`),
+    `THE CEO REPLIED: ${input.text}`,
+    "",
+    input.allowCustom
+      ? `Set "choice" to the option id the reply clearly means. If it means something else, set "choice" to "custom" and give fair integer effects between -12 and 12 (cash in cash points, see CASH) for what the CEO actually decided; a vague or empty answer is "custom" with mild negative effects.`
+      : `Set "choice" to the option id closest to the reply (this ticket only allows its options).`,
+    input.canPatch ? `"patches" is true only if the CEO's decision actually fixes or mitigates the risk.` : `"patches" is false.`,
+    `"reply" is one short Thai message from ${input.from ? input.from.name : "the team"} reacting to the CEO's answer, in their speech style.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const raw = await runJson(env, prompt, INTERPRET_SCHEMA, 400);
+  if (!isRecord(raw)) throw new Error("ตีความคำตอบไม่ได้");
+  const choice = typeof raw.choice === "string" ? raw.choice.trim().toLowerCase() : "";
+  const option = input.options.find((o) => o.id === choice);
+  const effects: Partial<Stats> = {};
+  if (isRecord(raw.effects)) {
+    for (const key of STAT_KEYS) {
+      const v = raw.effects[key];
+      if (typeof v === "number" && Number.isFinite(v) && v !== 0) effects[key] = clamp(Math.round(v), -12, 12);
+    }
+  }
+  const reply = typeof raw.reply === "string" ? truncate(raw.reply.trim(), 400) : "";
+  if (option || !input.allowCustom) {
+    const chosen = option ?? input.options[0];
+    return { optionId: chosen.id, effects: chosen.effects, patches: chosen.patches, reply };
+  }
+  return { optionId: null, effects, patches: input.canPatch && raw.patches === true, reply };
 }
 
 // Throws AiBudgetError when the shared daily budget is spent, so callers can fall back to scripted content.
@@ -521,7 +623,9 @@ function sanitizeDecision(raw: unknown): Scene["decision"] | null {
     });
   }
   if (options.length < 2) return null;
-  return { prompt: truncate(raw.prompt.trim(), 300), options };
+  // The question is narration; drop a trailing polite particle if the model added one anyway.
+  const prompt = raw.prompt.trim().replace(/s*(?:นะ)?(?:ครับ|ค่ะ|คะ)(?=s*[?？]?s*$)/, "");
+  return { prompt: truncate(prompt, 300), options };
 }
 
 function sanitizePresence(raw: unknown, staff: Employee[]): Partial<PresenceMap> {

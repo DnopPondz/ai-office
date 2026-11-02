@@ -1,4 +1,5 @@
 import type { AvatarSpec, Employee, RoleKey, Speech } from "../shared/types";
+import { baseSalary, getBusiness, randomSalary, type Business } from "./business";
 
 // Each company gets its own randomly generated staff. Scripted and pooled scenes are written
 // against roles ({dev}, {sec}, ...) and cast onto whoever holds that role.
@@ -133,26 +134,50 @@ function randomSpeech(name: string): Speech {
 }
 
 // A new company's staff, one per role, with names the player has not seen recently.
-export function generateStaff(recentNames: string[]): Employee[] {
+export function generateStaff(recentNames: string[], business: Business): Employee[] {
   const taken = new Set(recentNames);
-  let pool = NAMES.filter((n) => !taken.has(n));
-  if (pool.length < ROLE_KEYS.length) pool = [...NAMES];
   return ROLE_KEYS.map((roleKey) => {
-    const name = pick(pool);
-    pool = pool.filter((n) => n !== name);
-    const role = ROLES[roleKey];
-    return {
-      id: `e${crypto.randomUUID().replace(/-/g, "").slice(0, 7)}`,
-      name,
-      role: role.title,
-      emoji: role.emoji,
-      roleKey,
-      personality: pick(role.personalities),
-      secretGoal: pick([...role.secretGoals, ...SHARED_GOALS]),
-      speech: randomSpeech(name),
-      avatar: randomAvatar(roleKey),
-    };
+    const person = newEmployee(roleKey, business, taken);
+    taken.add(person.name);
+    return person;
   });
+}
+
+// Interns start junior; everyone else is hired at senior level.
+const START_LEVEL: Record<RoleKey, number> = { dev: 2, sec: 2, sales: 1, ops: 2, intern: 1, pm: 2 };
+
+function newEmployee(roleKey: RoleKey, business: Business, taken: Set<string>): Employee {
+  let pool = NAMES.filter((n) => !taken.has(n));
+  if (!pool.length) pool = [...NAMES];
+  const name = pick(pool);
+  const role = ROLES[roleKey];
+  return {
+    id: `e${crypto.randomUUID().replace(/-/g, "").slice(0, 7)}`,
+    name,
+    role: business.titles[roleKey] ?? role.title,
+    emoji: role.emoji,
+    roleKey,
+    personality: pick(role.personalities),
+    secretGoal: pick([...role.secretGoals, ...SHARED_GOALS]),
+    speech: randomSpeech(name),
+    avatar: randomAvatar(roleKey),
+    salary: randomSalary(roleKey, business),
+    morale: 60 + Math.floor(Math.random() * 21),
+    level: START_LEVEL[roleKey],
+  };
+}
+
+// Job applicants: like new staff, but asking anywhere from 20% below to 30% above the usual salary.
+export function generateCandidates(roleKey: RoleKey, business: Business, taken: Set<string>, count: number): Employee[] {
+  const out: Employee[] = [];
+  for (let i = 0; i < count; i++) {
+    const person = newEmployee(roleKey, business, taken);
+    person.salary = Math.round((person.salary * (0.8 + Math.random() * 0.5)) / 1000) * 1000;
+    person.morale = 75;
+    taken.add(person.name);
+    out.push(person);
+  }
+  return out;
 }
 
 // The original hand-made team, kept for companies started before staff were generated.
@@ -185,22 +210,30 @@ function legacy(
     secretGoal: secretGoal ?? role.secretGoals[0],
     speech,
     avatar: { looks, palette },
+    salary: baseSalary(roleKey, getBusiness("saas")),
+    morale: 70,
+    level: START_LEVEL[roleKey],
   };
 }
 
-// Stand-in staff for pooled scenes, which are shared by every company: ids are role keys and
-// names are {role} placeholders, filled in with the real names when a company plays the scene.
-export const ROLE_CAST: Employee[] = ROLE_KEYS.map((roleKey) => ({
-  id: roleKey,
-  name: `{${roleKey}}`,
-  role: ROLES[roleKey].title,
-  emoji: ROLES[roleKey].emoji,
-  roleKey,
-  personality: "ตามบทบาทของตำแหน่ง",
-  secretGoal: "ไม่ระบุ",
-  speech: { self: "เรา", end: "", ask: "" },
-  avatar: { looks: [], palette: {} },
-}));
+// Stand-in staff for pooled scenes, which are shared by every company of a business: ids are role
+// keys and names are {role} placeholders, filled in with the real names when a company plays it.
+export function roleCast(business: Business): Employee[] {
+  return ROLE_KEYS.map((roleKey) => ({
+    id: roleKey,
+    name: `{${roleKey}}`,
+    role: business.titles[roleKey] ?? ROLES[roleKey].title,
+    emoji: ROLES[roleKey].emoji,
+    roleKey,
+    personality: "ตามบทบาทของตำแหน่ง",
+    secretGoal: "ไม่ระบุ",
+    speech: { self: "เรา", end: "", ask: "" },
+    avatar: { looks: [], palette: {} },
+    salary: 0,
+    morale: 70,
+    level: 2,
+  }));
+}
 
 export function holder(staff: Employee[], role: RoleKey): Employee | undefined {
   return staff.find((e) => e.roleKey === role);

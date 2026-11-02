@@ -45,14 +45,9 @@ const ROOMS: { spot: MapSpot; x: number; y: number; w: number; h: number; label:
 ];
 
 // Desk centres; each employee owns the desk at their index and sits just below it.
-const DESKS: Point[] = [
-  [120, 290],
-  [320, 290],
-  [520, 290],
-  [120, 430],
-  [320, 430],
-  [520, 430],
-];
+// Ten desks (the most staff a company can have), five per row.
+const DESK_X = [80, 200, 320, 440, 560];
+const DESKS: Point[] = [...DESK_X.map((x): Point => [x, 290]), ...DESK_X.map((x): Point => [x, 430])];
 
 // Standing points (feet) in shared rooms, filled in arrival order.
 const SLOTS: Record<Exclude<MapSpot, "desk">, Point[]> = {
@@ -280,7 +275,11 @@ export function OfficeMap(props: OfficeMapProps) {
               <button onClick={() => props.onSelectEmployee(e.id)} className={p?.spot === "away" ? "is-away" : ""}>
                 <PixelAvatar id={e.id} size={34} />
                 <span>
-                  <b>{e.name}</b> <span className="roster-role">{e.role}</span>
+                  <b>{e.name}</b>{" "}
+                  <span className="roster-role">
+                    {e.role}
+                    {e.salary ? ` · ${e.salary.toLocaleString("en-US")} บาท/เดือน` : ""}
+                  </span>
                   <small>
                     {SPOT_LABELS[p?.spot ?? "desk"]} · {p?.activity ?? "ทำงาน"}
                   </small>

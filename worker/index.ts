@@ -1,20 +1,12 @@
 import { handleLogin, isAuthed, readCookie } from "./auth";
 import { Company } from "./company";
-import { ensureFreshNews, getRecentNews, refreshNews } from "./news";
+import { getRecentNews, refreshNews } from "./news";
 import { refreshDeps } from "./osv";
 import { fillScenePool } from "./pool";
 
 // Must match the second cron in wrangler.jsonc. Runs apart from the data refresh so each
 // invocation keeps its own CPU and subrequest budget.
 const POOL_CRON = "47 * * * *";
-
-// News and dependency advisories are refreshed by cron, and lazily before a turn as a fallback.
-async function ensureFreshData(env: Env): Promise<void> {
-  await Promise.all([
-    ensureFreshNews(env),
-    refreshDeps(env).catch((err) => console.error("dependency refresh failed", err)),
-  ]);
-}
 
 export { Company };
 
@@ -66,16 +58,30 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   }
   const company = env.COMPANY.get(env.COMPANY.idFromName(companyId));
 
+  // The client polls with the newest message id it has, and gets only what is newer.
+  const since = Math.max(0, Number(url.searchParams.get("since")) || 0);
+  const body =
+    request.method === "POST" ? await request.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+
   switch (`${request.method} ${url.pathname}`) {
     case "GET /api/state":
-      return json(await company.getState(), 200, headers);
-    case "POST /api/advance":
-      await ensureFreshData(env);
-      return json(await company.advance(), 200, headers);
-    case "POST /api/decide": {
-      const body = await request.json<{ optionId?: unknown }>().catch(() => ({ optionId: undefined }));
-      if (typeof body.optionId !== "string") return json({ error: "optionId required" }, 400, headers);
-      return json(await company.decide(body.optionId), 200, headers);
+      return json(await company.getState(since), 200, headers);
+    case "POST /api/chat": {
+      const channel = str(body.channel);
+      const text = str(body.text);
+      if (!channel || !text) return json({ error: "channel and text required" }, 400, headers);
+      return json(await company.chat(channel, text, since), 200, headers);
+    }
+    case "POST /api/answer": {
+      const ticketId = str(body.ticketId);
+      if (!ticketId) return json({ error: "ticketId required" }, 400, headers);
+      return json(await company.answer(ticketId, { optionId: str(body.optionId), text: str(body.text) }, since), 200, headers);
+    }
+    case "POST /api/team": {
+      const action = str(body.action);
+      if (!action) return json({ error: "action required" }, 400, headers);
+      return json(await company.team(action, { employeeId: str(body.employeeId), role: str(body.role) }, since), 200, headers);
     }
     case "POST /api/reset":
       return json(await company.reset(), 200, headers);
