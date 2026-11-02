@@ -1,5 +1,5 @@
 import type { DepVuln } from "../shared/types";
-import { DEPENDENCIES } from "./game";
+import { DEPENDENCIES, truncate } from "./game";
 
 // Real vulnerability data for the fictional company's pinned npm dependencies, from OSV.dev.
 const OSV_API = "https://api.osv.dev/v1";
@@ -128,7 +128,7 @@ export async function refreshDeps(env: Env): Promise<void> {
     if (!d) return [];
     const pinned = DEPENDENCIES.find((x) => x.name === d.p.package)?.version ?? "0.0.0";
     const range = pickRange(d.v, d.p.package, pinned);
-    const summary = d.v.summary ?? d.v.details?.slice(0, 200) ?? d.v.id;
+    const summary = d.v.summary ?? (d.v.details && truncate(d.v.details, 200)) ?? d.v.id;
     return [
       env.DB.prepare(
         `UPDATE dep_vulns SET summary = ?, aliases = ?, severity = ?, introduced = ?, fixed = ?, published = ?,

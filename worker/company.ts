@@ -22,6 +22,7 @@ import {
   regressionPosts,
   secBotDepPosts,
   secBotPosts,
+  truncate,
   welcomePosts,
   type DraftMessage,
   type PresenceMap,
@@ -294,7 +295,7 @@ export class Company extends DurableObject<Env> {
         seenKey: `${depVuln.package}:${depVuln.id}`,
         risk: {
           newsId: depVuln.id,
-          title: `${depVuln.package}@${current}: ${depVuln.summary.slice(0, 80)}`,
+          title: `${depVuln.package}@${current}: ${truncate(depVuln.summary, 80)}`,
           since: day,
           kind: "dependency",
           layer: "app",
@@ -392,7 +393,7 @@ export class Company extends DurableObject<Env> {
       .exec<MessageRow>("SELECT * FROM messages WHERE kind = 'chat' ORDER BY id DESC LIMIT ?", limit)
       .toArray()
       .reverse()
-      .map((m) => `#${m.channel} ${m.author}: ${m.text.slice(0, 160)}`);
+      .map((m) => `#${m.channel} ${m.author}: ${truncate(m.text, 160)}`);
   }
 
   private async view(s: StoredState): Promise<GameState> {

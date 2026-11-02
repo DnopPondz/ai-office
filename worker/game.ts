@@ -492,7 +492,7 @@ async function runJson(env: Env, prompt: string, schema: object, maxTokens: numb
     raw = await ai.run(MODEL, {
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
+        { role: "user", content: wellFormed(prompt) },
       ],
       max_tokens: maxTokens,
       temperature: 0.9,
@@ -612,6 +612,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+// Cuts by code point: slicing UTF-16 can split an emoji into a lone surrogate, which
+// Workers AI rejects as invalid JSON (error 8006).
+export function truncate(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : text;
+}
+
+// Older chat rows may already hold a split emoji; replace any lone surrogate before sending.
+function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
 }
