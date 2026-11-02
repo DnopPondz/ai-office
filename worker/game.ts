@@ -316,8 +316,8 @@ Only the option that merges the upgrade has "patches": true.`,
 The team reacts: blame, rollback or fix-forward debate, someone checks the changelog. The decision is about how to recover (all options "patches": false).`;
   }
   if (event.kind === "quiet") {
-    return `NO NEWS TODAY: a normal office day. Create drama from personalities and secret goals (deadlines, salary, gossip, burnout, sales pressure).
-The decision is about people or business (all options "patches": false).`;
+    return `NO NEWS TODAY: a normal day in this business. Build the drama from the BUSINESS CONCERNS (pick one, vary it) and the people's personalities and secret goals.
+It does not have to involve IT or code. The decision is about the business or the people (all options "patches": false).`;
   }
   const n = event.news;
   const block = [
@@ -330,8 +330,8 @@ The decision is about people or business (all options "patches": false).`;
     `CISA required action: ${n.requiredAction ?? "n/a"}`,
   ].join("\n");
   const impact = event.matched.length
-    ? `IMPACT: matches our stack (${event.matched.join(", ")}); version not verified. The team argues about who owns it, whether to patch now, and what it costs.`
-    : `IMPACT: does NOT match our stack. The team reacts lightly (relief, jokes, a lesson, someone checks for shadow IT). The decision can be about a related office issue (all options "patches": false).`;
+    ? `IMPACT: matches our stack (${event.matched.join(", ")}); version not verified. The team argues about who owns it, whether to patch now, what it costs, and what downtime would mean for this business's customers and operations.`
+    : `IMPACT: does NOT match our stack. The team reacts lightly (relief, jokes, a lesson). The decision is about a business issue from BUSINESS CONCERNS, not about code (all options "patches": false).`;
   return `${block}\n${impact}`;
 }
 
@@ -352,6 +352,7 @@ function scenePrompt(input: SceneInput): string {
     }`,
     "EMPLOYEES:",
     ...staffLines(input.staff),
+    `BUSINESS CONCERNS: ${business.concerns}`,
     `COMPANY TECH STACK (fictional): ${business.stack.map((s) => s.name).join(", ")}`,
     ...(openRisks ? [`OPEN UNPATCHED RISKS: ${risks}`] : []),
     ...(recent
@@ -427,6 +428,7 @@ function contextLines(c: ChatContext): string[] {
     `COMPANY: "${c.companyName}", a ${c.business.pitch}.`,
     `COMPANY STATS (0-100): ${STAT_KEYS.filter((k) => k !== "cash").map((k) => `${k}=${c.stats[k]}`).join(", ")}`,
     `CASH: ${Math.round(c.stats.cash)} THB. Monthly revenue about ${c.money.revenue} THB, monthly costs about ${c.money.cost} THB.`,
+    `BUSINESS CONCERNS: ${c.business.concerns}`,
     `COMPANY TECH STACK (fictional): ${c.business.stack.map((s) => s.name).join(", ")}`,
     "EMPLOYEES:",
     ...staffLines(c.staff),
@@ -461,6 +463,24 @@ export async function generateChatReply(
     .map((m) => (dmWith ? { ...m, author: dmWith.id, channel: input.channel } : { ...m, channel: m.channel.startsWith("dm-") ? input.channel : m.channel }))
     .slice(0, 3);
   return { messages, presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff) };
+}
+
+// First messages of a new company, so every start feels different.
+export async function generateWelcome(env: Env, input: ChatContext): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
+  const prompt = [
+    ...contextLines(input),
+    "",
+    "THE NEW CEO STARTS TODAY.",
+    'Write 4 to 6 short first messages: a few employees greet the new CEO in "general", one or two talk in "dev" or "random", and at least one sends the CEO a private DM ("dm-<their id>").',
+    "Each speaks in character and in role, so their personalities show, and secret goals leak only as hints. They may mention the business, the company's numbers or its systems.",
+    "Make it specific to this company and team, not a generic greeting. No decisions.",
+    PRESENCE_RULES,
+  ].join("\n");
+  const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 800);
+  return {
+    messages: sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).slice(0, 6),
+    presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
+  };
 }
 
 const INTERPRET_SCHEMA = {

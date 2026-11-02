@@ -36,6 +36,8 @@ interface QuietScript extends ScriptedScene {
   id: string;
   // Business-specific scenes only appear for that business type.
   business?: string;
+  // About building software (code, databases, features); skipped for non-software businesses.
+  software?: boolean;
 }
 
 const at = (spot: OfficeSpot, activity: string, mood: string): Presence => ({ spot, activity, mood });
@@ -82,6 +84,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "sales-promise",
+    software: true,
     lines: [
       say("sales", "general", "ข่าวดีทุกคน! ลูกค้ารายใหญ่จะเซ็นสัญญาแล้ว ถ้าเรามีระบบ export รายงานภายในวันศุกร์ 🚀"),
       say("dev", "dev", "ระบบ export ไหน{ask} เรายังไม่มีนะ"),
@@ -120,6 +123,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "intern-staging",
+    software: true,
     lines: [
       say("intern", "dev", "พี่ๆ {I}กดลบ database ที่ชื่อ staging-old ไป{end} คิดว่าไม่มีใครใช้แล้ว 😅"),
       say("dev", "dev", "อันนั้นคือ staging ที่ทุกคนใช้อยู่ ชื่อมันหลอก"),
@@ -158,6 +162,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "pm-roadmap",
+    software: true,
     lines: [
       say("pm", "general", "{I}ร่าง roadmap ไตรมาสหน้าเสร็จแล้วนะ{ask} มี 12 ฟีเจอร์ ทุกอย่างลูกค้าขอมาหมดเลย 📋"),
       say("dev", "dev", "12 ฟีเจอร์ คนทำมีสองคน"),
@@ -234,6 +239,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "dev-refactor",
+    software: true,
     lines: [
       say("dev", "dev", "โค้ดส่วน payment ไม่มีใครกล้าแตะแล้ว มี comment ว่า 'อย่าลบบรรทัดนี้ ไม่รู้ทำไมแต่ลบแล้วพัง'"),
       say("intern", "dev", "{I}ลบไปเมื่อวาน{end} แล้วก็ใส่คืนแล้ว 😅"),
@@ -314,6 +320,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "oncall",
+    software: true,
     lines: [
       say("ops", "dev", "เดือนนี้{I}เข้าเวร on-call คนเดียวทุกคืน 31 คืน"),
       say("dev", "dev", "ก็{ops}เก่งสุด"),
@@ -351,6 +358,7 @@ const QUIET_SCRIPTS: QuietScript[] = [
   },
   {
     id: "questionnaire",
+    software: true,
     lines: [
       say("sales", "general", "ลูกค้ารายใหญ่ส่งแบบสอบถาม security มา 200 ข้อ ต้องตอบภายในพรุ่งนี้!"),
       say("sales", "dev", "ตอบ 'มี' ทุกข้อไปเลยได้ไหม{ask} ข้อ 47 ถามว่ามี SOC ไหม เรามีใช่ไหม"),
@@ -1170,11 +1178,13 @@ function requiredRoles(script: ScriptedScene): Set<RoleKey> {
 }
 
 // Picks a quiet scene the company has not seen recently and has the people for.
-export function pickQuietScript(recent: string[], staff: Employee[], business: string): QuietScript {
+export function pickQuietScript(recent: string[], staff: Employee[], business: { id: string; software: number }): QuietScript {
   const castable = (s: QuietScript) => [...requiredRoles(s)].every((r) => holder(staff, r));
-  const own = BUSINESS_SCRIPTS.filter((s) => s.business === business && castable(s) && !recent.includes(s.id));
+  const own = BUSINESS_SCRIPTS.filter((s) => s.business === business.id && castable(s) && !recent.includes(s.id));
+  // Coding-centred scripts are skipped for businesses that are not mainly software.
+  const fits = (s: QuietScript) => castable(s) && !(s.software && business.software < 0.5);
   if (own.length && Math.random() < BUSINESS_SCENE_CHANCE) return own[Math.floor(Math.random() * own.length)];
-  const generic = QUIET_SCRIPTS.filter(castable);
+  const generic = QUIET_SCRIPTS.filter(fits);
   const choices = generic.length ? generic : QUIET_SCRIPTS;
   const fresh = choices.filter((s) => !recent.includes(s.id));
   const pool = fresh.length ? fresh : choices;
@@ -1261,26 +1271,59 @@ export function regressionScript(pkg: string, version: string): ScriptedScene {
   };
 }
 
-const WELCOME_LINES: Line[] = [
-  say("pm", "general", "ยินดีต้อนรับ{end} CEO 😊 มีอะไรให้{I}ช่วยบอกได้เลยนะ{ask}"),
-  say("intern", "general", "สวัสดี{end}! ชื่อ{intern} เป็น intern พร้อมลุยทุกงาน 💪"),
-  say("dev", "dev", "CEO ใหม่อีกแล้วเหรอ... ก็ดี ขอแค่อย่าเพิ่งสั่ง refactor ก็พอ"),
-  say("sec", "dev", "ขอเตือนไว้ก่อนเลยนะ{ask} ระบบเรายังไม่ได้ patch หลายตัว 🫠"),
-];
+// Fallback greetings when the model cannot write them: several per role, a random few each time.
+const WELCOME_LINES: Record<RoleKey, Line[]> = {
+  pm: [
+    say("pm", "general", "ยินดีต้อนรับ{end} CEO 😊 มีอะไรให้{I}ช่วยบอกได้เลยนะ{ask}"),
+    say("pm", "general", "สวัสดี{end} CEO {I}สรุปงานค้างไว้ให้แล้ว อ่านได้เลยนะ{ask} 📋"),
+    say("pm", "dm", "CEO {I}จองห้องประชุมไว้บ่ายนี้ อยากเล่าเรื่องในทีมให้ฟังก่อน{end} 😊"),
+  ],
+  intern: [
+    say("intern", "general", "สวัสดี{end}! ชื่อ{intern} เป็น intern พร้อมลุยทุกงาน 💪"),
+    say("intern", "random", "CEO คนใหม่มาแล้ว! {I}ขอถ่ายรูปลงสตอรี่ได้ไหม{ask} 📸"),
+    say("intern", "dm", "สวัสดี{end} CEO ถ้ามีอะไรให้ช่วย เรียก{I}ได้เลยนะ{ask} 🐣"),
+  ],
+  dev: [
+    say("dev", "dev", "CEO ใหม่อีกแล้วเหรอ... ก็ดี ขอแค่อย่าเพิ่งสั่ง refactor ก็พอ"),
+    say("dev", "general", "ยินดีต้อนรับ{end} เตือนไว้ก่อนว่าโค้ดเรามีหนี้ทางเทคนิคเยอะหน่อย"),
+    say("dev", "dm", "สวัสดี{end} CEO ถ้าจะขอฟีเจอร์ใหม่ ขอเป็นลายลักษณ์อักษรนะ{ask} 😅"),
+  ],
+  sec: [
+    say("sec", "dev", "ขอเตือนไว้ก่อนเลยนะ{ask} ระบบเรายังไม่ได้ patch หลายตัว 🫠"),
+    say("sec", "general", "ยินดีต้อนรับ{end} CEO ช่วยเปิด MFA ให้บัญชีด้วยนะ{ask} 🔐"),
+    say("sec", "dm", "สวัสดี{end} CEO {I}มีรายการความเสี่ยงที่อยากคุยด้วยเร็วๆ นี้"),
+  ],
+  sales: [
+    say("sales", "general", "CEO! ลูกค้ารอคุยกับผู้บริหารคนใหม่อยู่เลย{end} 💼"),
+    say("sales", "dm", "ยินดีต้อนรับ{end} เดือนนี้ยอดยังไม่ถึงเป้า แต่{I}มีดีลใหญ่รออยู่"),
+    say("sales", "random", "มีผู้บริหารใหม่ เดี๋ยวเย็นนี้เลี้ยงต้อนรับไหม{ask} 🍻"),
+  ],
+  ops: [
+    say("ops", "dev", "ยินดีต้อนรับ{end} ระบบตอนนี้... ยังไม่ล่มก็ดีแล้ว"),
+    say("ops", "general", "สวัสดี{end} ถ้าเห็นกราฟแดงๆ ไม่ต้องตกใจ {I}ดูอยู่"),
+    say("ops", "dm", "CEO backup เมื่อคืนผ่านนะ{ask} เผื่ออยากรู้ว่าเรายังรอด"),
+  ],
+};
 
-export function welcomePosts(staff: Employee[], company: { name: string; business: string }): DraftMessage[] {
-  return [
-    {
-      channel: "general",
-      author: "system",
-      kind: "system",
-      text:
-        `👋 ยินดีต้อนรับ CEO คนใหม่ของ ${company.name} (${company.business})! ออฟฟิศเริ่มทำงานแล้ว\n` +
-        "เรื่องที่ต้องตัดสินใจจะเข้ามาใน 📥 Inbox (ตอบไม่ทันมีผลกระทบ) และพิมพ์คุยกับพนักงานได้ทุกคน\n" +
-        "ข่าวใน #security-alerts เป็นข่าวจริงจาก CISA KEV (ผ่าน NVD) ส่วนบริษัทและพนักงานเป็นเรื่องสมมติ",
-    },
-    ...castLines(WELCOME_LINES, staff),
-  ];
+export function welcomeNotice(company: { name: string; business: string }): DraftMessage {
+  return {
+    channel: "general",
+    author: "system",
+    kind: "system",
+    text:
+      `👋 ยินดีต้อนรับ CEO คนใหม่ของ ${company.name} (${company.business})! ออฟฟิศเริ่มทำงานแล้ว\n` +
+      "เรื่องที่ต้องตัดสินใจจะเข้ามาใน 📥 Inbox (ตอบไม่ทันมีผลกระทบ) และพิมพ์คุยกับพนักงานได้ทุกคน\n" +
+      "ข่าวใน #security-alerts เป็นข่าวจริงจาก CISA KEV (ผ่าน NVD) ส่วนบริษัทและพนักงานเป็นเรื่องสมมติ",
+  };
+}
+
+// Three or four employees, one random greeting each.
+export function welcomeLines(staff: Employee[]): DraftMessage[] {
+  const roles = [...new Set(staff.map((e) => e.roleKey))].sort(() => Math.random() - 0.5).slice(0, 3 + Math.floor(Math.random() * 2));
+  return castLines(
+    roles.map((r) => WELCOME_LINES[r][Math.floor(Math.random() * WELCOME_LINES[r].length)]),
+    staff,
+  );
 }
 
 // Lines whose speaker or named colleague the company lacks are dropped.

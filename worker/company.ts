@@ -26,6 +26,7 @@ import {
   generateAftermath,
   generateChatReply,
   generateScene,
+  generateWelcome,
   interpretReply,
   matchStack,
   matchStackItems,
@@ -52,7 +53,8 @@ import {
   pickQuietScript,
   regressionScript,
   toScene,
-  welcomePosts,
+  welcomeLines,
+  welcomeNotice,
   type ScriptedScene,
 } from "./scripted";
 import { newTicket, openTickets, publicTicket, pruneTickets, sceneToTicket, worstOption, type Ticket } from "./tickets";
@@ -75,7 +77,9 @@ const MAX_DAYS_PER_TICK = 3;
 const MAX_OPEN_TICKETS = 5;
 const MAX_QUEUED_REPLIES = 4;
 // Quiet office days: how often the model writes the scene (when budget allows) instead of a script.
+// Non-software businesses lean on the model, since most scripts are about a tech team.
 const AI_QUIET_CHANCE = 0.5;
+const AI_QUIET_CHANCE_NON_SOFTWARE = 0.85;
 // A job that has been "running" this long was lost (the object restarted); drop it.
 const STALE_JOB_MS = 2 * 60 * 1000;
 
@@ -88,6 +92,7 @@ const MAX_TEXT = 500;
 
 // AI work runs one job at a time from the alarm, never inside a player's request.
 type Job =
+  | { type: "welcome" }
   | { type: "event" }
   | { type: "reply"; channel: string; text: string }
   | { type: "aftermath"; ticketId: string; optionId: string }
@@ -287,6 +292,7 @@ export class Company extends DurableObject<Env> {
   }
 
   private async runJob(job: Job): Promise<void> {
+    if (job.type === "welcome") return this.runWelcome();
     if (job.type === "event") return this.runEvent();
     if (job.type === "reply") return this.runReply(job.channel, job.text);
     if (job.type === "aftermath") return this.runAftermath(job.ticketId, job.optionId);
@@ -530,9 +536,10 @@ export class Company extends DurableObject<Env> {
         else plan = null;
       }
       if (!scene) {
-        if (Math.random() < AI_QUIET_CHANCE) scene = await live({ kind: "quiet" }, s0.openRisks);
+        const aiQuiet = b.software < 0.5 ? AI_QUIET_CHANCE_NON_SOFTWARE : AI_QUIET_CHANCE;
+        if (Math.random() < aiQuiet) scene = await live({ kind: "quiet" }, s0.openRisks);
         if (!scene) {
-          const quiet = pickQuietScript(s0.recentScripts, s0.staff, b.id);
+          const quiet = pickQuietScript(s0.recentScripts, s0.staff, b);
           quietId = quiet.id;
           scripted = quiet;
         }
@@ -584,6 +591,24 @@ export class Company extends DurableObject<Env> {
       s.tickets.push(ticket);
       posts.push(notice);
       s.gameOver = checkGameOver(s.stats);
+    });
+  }
+
+  // The team's first messages, written by the model when possible.
+  private async runWelcome(): Promise<void> {
+    const s0 = await this.load();
+    let messages: DraftMessage[] = [];
+    let presence: Partial<PresenceMap> = {};
+    try {
+      const r = await generateWelcome(this.env, this.chatContext(s0));
+      messages = r.messages;
+      presence = r.presence;
+    } catch (err) {
+      if (!(err instanceof AiBudgetError)) console.error("welcome failed", err);
+    }
+    await this.mutate((s, posts) => {
+      posts.push(...(messages.length >= 2 ? messages : welcomeLines(s.staff)));
+      s.presence = mergePresence(s.presence, presence);
     });
   }
 
@@ -702,7 +727,8 @@ export class Company extends DurableObject<Env> {
     const pooled = await pooledKeys(this.env, [...fresh.map(newsKey), ...vulns.map(depKey)]);
     const usableNews = aiOk ? fresh : fresh.filter((n) => pooled.has(newsKey(n)));
     const matchedNews = usableNews.find((n) => matchStack(n, b.stack).length);
-    const depVuln = vulns.find((v) => aiOk || pooled.has(depKey(v)));
+    // npm advisories (pull requests, package.json) mostly matter to software businesses.
+    const depVuln = Math.random() < b.software ? vulns.find((v) => aiOk || pooled.has(depKey(v))) : undefined;
 
     if (depVuln && (!matchedNews || Math.random() < DEPENDENCY_EVENT_CHANCE)) {
       const current = s.deps[depVuln.package];
@@ -794,11 +820,11 @@ export class Company extends DurableObject<Env> {
       nextEventAt: FIRST_EVENT_MS,
       nextChatterAt: 15 * 1000,
       tickets: [],
-      jobs: [],
+      jobs: [{ type: "welcome" }],
       running: null,
       runningSince: 0,
     };
-    this.insert(welcomePosts(staff, { name: fresh.companyName, business: b.label }));
+    this.insert([welcomeNotice({ name: fresh.companyName, business: b.label })]);
     await this.save(fresh);
     return fresh;
   }
@@ -852,7 +878,7 @@ export class Company extends DurableObject<Env> {
     const messages: ChatMessage[] = rows.map((m) => ({ ...m, kind: m.kind as MessageKind }));
     const b = getBusiness(s.businessId);
     const typingOf = (j: Job | null): string | null =>
-      !j ? null : j.type === "reply" ? j.channel : j.type === "event" ? null : `ticket:${j.ticketId}`;
+      !j ? null : j.type === "reply" ? j.channel : j.type === "welcome" ? "general" : j.type === "event" ? null : `ticket:${j.ticketId}`;
     const open = openTickets(s.tickets).sort((x, y) => x.deadline - y.deadline);
     const closed = s.tickets.filter((t) => !open.includes(t));
     return {
@@ -923,8 +949,8 @@ function migrate(existing: StoredState & { decision?: LegacyDecision | null; scr
     epoch: existing.epoch ?? crypto.randomUUID(),
     businessId: b.id,
     companyName: existing.companyName ?? "ออฟฟิศ AI",
-    // Before baht, cash was a 0-100 bar; one point maps to one cash unit.
-    stats: legacyCash ? { ...existing.stats, cash: existing.stats.cash * cashUnit(b) } : existing.stats,
+    // Before baht, cash was a 0-100 bar that started at 70; 70 maps to the starting cash.
+    stats: legacyCash ? { ...existing.stats, cash: Math.round((existing.stats.cash / 70) * b.startCash) } : existing.stats,
     staff,
     presence: existing.presence ?? defaultPresence(staff),
     deps: existing.deps ?? companyDeps(b),

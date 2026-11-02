@@ -20,6 +20,11 @@ export interface Business {
   startCash: number;
   // Revenue relative to monthly costs at the starting stats; below 1 burns cash from day one.
   margin: number;
+  // 0-1: how much of the business is its own software. Low values mean fewer npm/PR tickets
+  // and no coding-centred scripted scenes.
+  software: number;
+  // Day-to-day business problems, in English, so the model writes scenes about this business.
+  concerns: string;
   stats: Omit<Stats, "cash">;
 }
 
@@ -107,6 +112,8 @@ const S = {
 export const BUSINESSES: Business[] = [
   {
     id: "saas",
+    software: 1,
+    concerns: "enterprise customer churn, feature requests from big clients, uptime SLAs, customers' security reviews",
     label: "SaaS ขายระบบให้องค์กร",
     pitch: "B2B SaaS selling HR and workflow software to companies; enterprise customers ask for security reviews",
     names: ["CloudDesk", "ไทยเวิร์คโฟลว์", "HRly", "สยามซอฟต์", "TaskThai", "OfficeMate Cloud"],
@@ -121,6 +128,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "clinic",
+    software: 0.2,
+    concerns: "appointment no-shows, dentists' schedules, patient privacy (PDPA), equipment costs, online reviews",
     label: "คลินิกทันตกรรมหลายสาขา",
     pitch: "multi-branch dental clinic with online booking; holds patient records and X-ray images (sensitive personal data under Thailand's PDPA)",
     names: ["ยิ้มสวยเดนทัล", "ฟันดีคลินิก", "SmilePlus Dental", "บ้านหมอฟัน", "เดนทัลแคร์สยาม", "Happy Teeth"],
@@ -135,6 +144,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "ecommerce",
+    software: 0.7,
+    concerns: "flash sales, shipping delays, returns and fake reviews, ad spend, payment fraud",
     label: "ร้านเสื้อผ้าออนไลน์",
     pitch: "online fashion shop living on flash sales (11.11, 12.12); stores payment details and customer addresses",
     names: ["แต่งตัวดี.com", "Siam Closet", "เสื้อสวยช็อป", "ThaiThread", "ชุดนี้ดีย์", "StyleMart TH"],
@@ -149,6 +160,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "fintech",
+    software: 1,
+    concerns: "regulator rules, scams targeting users, transaction limits, partner banks, app store reviews",
     label: "e-wallet / fintech",
     pitch: "e-wallet app under financial regulator supervision; moves customers' money and must report incidents to the regulator",
     names: ["จ่ายจ๊ะ", "PaySabai", "วอลเล็ตใจดี", "Baht+", "โอนไว", "SiamPayGo"],
@@ -163,6 +176,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "logistics",
+    software: 0.5,
+    concerns: "late deliveries, rider pay and protests, fuel costs, lost parcels, hub capacity",
     label: "บริษัทขนส่งพัสดุด่วน",
     pitch: "parcel delivery company with a rider app, sorting hubs and live tracking",
     names: ["ส่งไวเอ็กซ์เพรส", "ThaiRider Logistics", "ด่วนจี๋", "ParcelGo", "ขนส่งใจดี", "SpeedBox TH"],
@@ -177,6 +192,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "gamestudio",
+    software: 0.9,
+    concerns: "the player community, in-game events, monetization backlash, cheaters, launch deadlines",
     label: "สตูดิโอเกมมือถือ",
     pitch: "mobile game studio running online multiplayer servers, in-app purchases and a loud player community",
     names: ["ปิกเซลช้าง", "Tuk Tuk Games", "มังกรน้อยสตูดิโอ", "Lanna Pixel", "เกมดีมีสุข", "Siam Arcade"],
@@ -191,6 +208,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "smartfarm",
+    software: 0.5,
+    concerns: "harvest season, farmers' cash flow, broken field devices, weather, distributors",
     label: "Smart farm / IoT เกษตร",
     pitch: "IoT sensors and automatic irrigation for durian orchards and greenhouses; hundreds of field devices and cameras",
     names: ["ฟาร์มฉลาด", "ทุเรียนเทค", "GreenSense", "สวนดีไอโอที", "AgriThai Tech", "น้ำหยดอัจฉริยะ"],
@@ -205,6 +224,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "edtech",
+    software: 0.8,
+    concerns: "exam season, parents' complaints, tutors' contracts, content quality, school partnerships",
     label: "แพลตฟอร์มเรียนออนไลน์",
     pitch: "online learning platform for high-school students: video lessons and exams; holds data about minors",
     names: ["ติวเก่ง", "เรียนดีออนไลน์", "ครูใจดีออนไลน์", "SmartKid TH", "ห้องเรียนไร้ขอบ", "StudyBuddy"],
@@ -219,6 +240,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "hotel",
+    software: 0.2,
+    concerns: "high and low season occupancy, booking-site commissions, guest complaints and reviews, staff turnover, weddings and events",
     label: "กลุ่มรีสอร์ทริมทะเล",
     pitch: "beach resort group with an online booking engine, guest data and front-desk systems; busy high season",
     names: ["ทะเลใสรีสอร์ท", "Andaman Breeze", "บ้านริมหาด", "Lanta Hideaway", "ภูผาวิลล่า", "Coral Bay Stay"],
@@ -233,6 +256,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "restaurant",
+    software: 0.2,
+    concerns: "food costs and suppliers, staff shortages at branches, delivery-app commissions, health inspections, menu changes, reviews",
     label: "เชนร้านอาหาร",
     pitch: "restaurant chain with POS tablets in every branch, delivery app integrations and a loyalty app",
     names: ["ข้าวมันไก่เฮียตี๋", "ส้มตำแซ่บนัว", "Noodle Nation", "ครัวคุณยาย", "หมูกระทะบุฟเฟ่ต์ดี", "Kafe Ka-Nom"],
@@ -247,6 +272,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "media",
+    software: 0.6,
+    concerns: "ad revenue, corrections and fake news, viral stories, editors' workload, social media algorithm changes",
     label: "สำนักข่าวออนไลน์",
     pitch: "online news site living on ad revenue; traffic spikes on breaking news; editors' accounts are a target",
     names: ["ข่าวไว", "ThaiDaily Now", "ทันข่าว", "Siam Buzz", "เล่าข่าวเช้า", "Newsroom TH"],
@@ -261,6 +288,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "accounting",
+    software: 0.2,
+    concerns: "tax season deadlines, clients' missing documents, staff overtime, new regulations, keeping big clients",
     label: "สำนักงานบัญชีและที่ปรึกษาภาษี",
     pitch: "accounting and tax firm handling clients' financial statements and large file transfers; peak in tax season",
     names: ["บัญชีใจดี", "TaxEasy TH", "สำนักงานบัญชีสยาม", "Ledger Plus", "ภาษีไม่ปวดหัว", "CountOn Accounting"],
@@ -275,6 +304,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "fitness",
+    software: 0.8,
+    concerns: "membership churn, trainers, wearable partners, influencer marketing, users' health data",
     label: "แอปฟิตเนสและสตูดิโอ",
     pitch: "fitness app with wearable integration, memberships and studio bookings; stores users' health data",
     names: ["ฟิตดีทุกวัน", "Sweat Siam", "แข็งแรงแอป", "FitBuddy TH", "ยืดเหยียดคลับ", "PulseUp"],
@@ -289,6 +320,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "condo",
+    software: 0.3,
+    concerns: "residents' complaints, parcel lockers, maintenance contractors, common fees, security guards",
     label: "บริหารคอนโดอัจฉริยะ",
     pitch: "smart condo management: keycards, CCTV, a resident app and parcel lockers across several buildings",
     names: ["คอนโดสบาย", "Smart Living TH", "บ้านฉลาด", "The Nest Residence", "อยู่ดีคอนโด", "UrbanKey"],
@@ -303,6 +336,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "factory",
+    software: 0.2,
+    concerns: "production targets, machine downtime, supplier delays, worker safety, car makers' audits",
     label: "โรงงานผลิตชิ้นส่วนรถยนต์",
     pitch: "auto parts factory: production lines run on PLC/SCADA, plus an ERP and a supplier portal",
     names: ["สยามออโต้พาร์ท", "ไทยชิ้นส่วนยนต์", "Eastern Gear Works", "อะไหล่ดีการช่าง", "Rayong Precision", "ProParts Thailand"],
@@ -317,6 +352,8 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "insurance",
+    software: 0.6,
+    concerns: "claim disputes, fraudulent claims, agents' commissions, regulator rules, price competition",
     label: "โบรกเกอร์ประกันภัยออนไลน์",
     pitch: "online car and travel insurance broker; stores claim photos, ID card scans and payment data",
     names: ["ประกันง่าย", "Safe Sabai", "คุ้มครองดี", "InsureMe TH", "ชัวร์ไว้ก่อน", "RodPlus Insurance"],
@@ -371,10 +408,11 @@ export function randomSalary(role: RoleKey, b: Business): number {
   return round1000(baseSalary(role, b) * (0.85 + Math.random() * 0.3));
 }
 
-// Decision effects on cash are written in points; one point is about 1/70 of starting cash,
-// so a -10 hurts about as much as it did on the old 0-100 cash bar.
+// Decision effects on cash are written in points; one point is about 1/150 of starting cash.
+// The live office asks for a decision every couple of minutes, so a point has to be small
+// enough that a company survives hours of play, not just a few dozen turns.
 export function cashUnit(b: Business): number {
-  return Math.max(5000, Math.round(b.startCash / 70 / 5000) * 5000);
+  return Math.max(5000, Math.round(b.startCash / 150 / 5000) * 5000);
 }
 
 export function monthlyCost(b: Business, staff: Employee[]): number {
