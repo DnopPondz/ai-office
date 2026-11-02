@@ -374,7 +374,7 @@ button:disabled {
   margin: 8px 0 0;
 }
 
-/* Office map */
+/* Office map (8-bit pixel art) */
 .office {
   display: grid;
   gap: 10px;
@@ -387,11 +387,12 @@ button:disabled {
 .ticker {
   text-align: left;
   background: var(--bot);
-  border: 1px solid var(--accent);
+  border: 2px solid var(--accent);
+  border-radius: 0;
   color: var(--text);
-  border-radius: 8px;
   padding: 6px 10px;
-  font-size: 0.85rem;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.82rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -399,75 +400,117 @@ button:disabled {
 
 .map-scroll {
   overflow-x: auto;
-  border-radius: 16px;
+  border: 3px solid #1a1c2c;
+  background: #101118;
 }
 
 .office-map {
   display: block;
   width: 100%;
-  min-width: 600px;
+  min-width: 640px;
   height: auto;
+  image-rendering: pixelated;
 }
 
-.floor { fill: #202327; }
-.room { fill: #2a2d32; stroke: #3b3e44; stroke-width: 2; }
-.room-ceo { fill: #2d2a33; }
-.room-server { fill: #1b2430; }
-.room-pantry { fill: #2f2b25; }
-.room-lounge { fill: #26302b; }
-.office-map.breach .room-server { animation: breach-flash 1s steps(2) infinite; }
+.office-map text {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+}
+
+.outside { fill: #101118; }
+.wall { fill: #4b5363; }
+.wall-edge { fill: #2b303b; }
+.room-border { fill: none; stroke: #1a1c2c; stroke-width: 4; }
+.office-map.breach .room-server .wall { animation: breach-flash 0.8s steps(2) infinite; }
 
 @keyframes breach-flash {
-  50% { fill: #4a1622; }
+  50% { fill: #be1f3b; }
 }
 
-.room-label { fill: var(--muted); font-size: 13px; font-weight: 700; }
-.prop { font-size: 18px; }
-.desk-top, .table { fill: #4a3f35; }
-.whiteboard { fill: #e8e8e8; }
-.rack { fill: #0f1418; stroke: #3b4652; }
-.counter { fill: #5a4a3a; }
-.sofa { fill: #3d6b58; }
-.tv { fill: #111; }
+.room-sign rect { fill: #1a1c2c; }
+.room-sign text { fill: #f4f4f4; font-size: 11px; }
 .door { fill: #8a6a45; }
-.led { fill: var(--ok); animation: blink 1.6s infinite; }
-.led.alarm { fill: var(--danger); animation-duration: 0.6s; }
-.alarm-label { fill: #ffb3c6; font-size: 12px; font-weight: 700; }
+
+.led { animation: blink 1.6s steps(2) infinite; }
+.led.alarm { animation-duration: 0.5s; }
 
 @keyframes blink {
-  50% { opacity: 0.25; }
+  50% { opacity: 0.2; }
 }
 
-.sprite { cursor: pointer; transition: transform 1.8s ease-in-out; }
+.sprite,
+.hacker { cursor: pointer; transition: transform 1.8s linear; }
+.hacker { cursor: default; }
 .sprite:focus { outline: none; }
-.sprite:focus-visible .body { stroke: #fff; stroke-width: 2; }
-.sprite .shadow { fill: rgba(0, 0, 0, 0.35); }
-.sprite .leg { fill: #2b2f36; transform-box: fill-box; transform-origin: top center; }
-.sprite.walking .leg-left { animation: step 0.3s ease-in-out infinite alternate; }
-.sprite.walking .leg-right { animation: step 0.3s ease-in-out infinite alternate-reverse; }
-.sprite.walking .body,
-.sprite.walking .face { animation: bob 0.3s ease-in-out infinite alternate; }
-.sprite .face { font-size: 22px; }
-.sprite .mood { font-size: 14px; }
-.sprite .name {
-  fill: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-  paint-order: stroke;
-  stroke: #15171a;
-  stroke-width: 3px;
-}
-.bubble rect { fill: #fff; }
-.bubble text { fill: #1a1d21; font-size: 12px; }
+.sprite:focus-visible .name-tag rect { stroke: #ffcd75; stroke-width: 2; }
+.sprite .shadow,
+.hacker .shadow { fill: rgba(0, 0, 0, 0.4); }
 
-@keyframes step {
-  from { transform: rotate(-22deg); }
-  to { transform: rotate(22deg); }
+/* Walk cycle: two frames swapped in steps; idle frame bobs one pixel. */
+.sprite .frame-walk-a,
+.sprite .frame-walk-b { visibility: hidden; }
+.sprite.walking .frame-idle { visibility: hidden; }
+.sprite.walking .frame-walk-a { animation: frame-a 0.36s steps(1) infinite; }
+.sprite.walking .frame-walk-b { animation: frame-b 0.36s steps(1) infinite; }
+.sprite:not(.walking) .frame-idle { animation: idle-bob 1.4s steps(1) infinite; }
+
+@keyframes frame-a {
+  0% { visibility: visible; }
+  50% { visibility: hidden; }
 }
 
-@keyframes bob {
-  to { transform: translateY(-2px); }
+@keyframes frame-b {
+  0% { visibility: hidden; }
+  50% { visibility: visible; }
 }
+
+@keyframes idle-bob {
+  50% { transform: translateY(1px); }
+}
+
+.name-tag rect { fill: #1a1c2c; }
+.name-tag text { fill: #f4f4f4; font-size: 11px; }
+.bubble rect { fill: #fff1e8; stroke: #1a1c2c; stroke-width: 3; }
+.bubble rect.bubble-tail { stroke: none; fill: #1a1c2c; }
+.bubble text { fill: #1a1c2c; font-size: 11px; }
+
+.attack-shadow { fill: none; stroke: #1a1c2c; stroke-width: 8; stroke-linejoin: miter; }
+.attack-path {
+  fill: none;
+  stroke: #ff004d;
+  stroke-width: 4;
+  stroke-dasharray: 9 7;
+  stroke-linejoin: miter;
+  animation: march 0.9s linear infinite;
+}
+.attack.breach .attack-path { stroke-dasharray: none; animation: blink 0.5s steps(2) infinite; }
+.attack-label { fill: #ff004d; }
+.attack-label-text { fill: #fff1e8; font-size: 10px; }
+
+@keyframes march {
+  to { stroke-dashoffset: -32; }
+}
+
+.attack-legend {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  border: 2px solid #ff004d;
+  background: #2a1520;
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  background: #ff004d;
+}
+
+.legend-note { color: var(--muted); font-size: 0.75rem; }
 
 .roster {
   list-style: none;
@@ -485,33 +528,65 @@ button:disabled {
   align-items: center;
   text-align: left;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 2px solid #1a1c2c;
+  border-radius: 0;
   color: var(--text);
-  border-radius: 8px;
   padding: 6px 10px;
 }
 
 .roster button:hover { border-color: var(--accent); }
-.roster button.is-away { opacity: 0.6; }
+.roster button.is-away { opacity: 0.55; }
 .roster small { display: block; color: var(--muted); font-size: 0.75rem; }
+.roster-role { color: var(--muted); font-size: 0.75rem; }
+.away-note { color: var(--muted); font-size: 0.85rem; margin: 0; }
 
-.roster-face {
+.pixel-avatar {
+  display: block;
   flex: none;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  font-size: 1.1rem;
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
 }
 
-.away-note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.channel-label { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Pull request diff in chat */
+.diff {
+  margin-top: 4px;
+  border: 2px solid #1a1c2c;
+  background: #15171c;
+  max-width: 560px;
+}
+.diff-title {
+  margin: 0;
+  padding: 6px 10px;
+  background: #22262e;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.diff pre {
+  margin: 0;
+  padding: 6px 10px;
+  overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.diff .add { display: block; background: #12361f; color: #8ff0a4; }
+.diff .del { display: block; background: #3d1418; color: #ffa3ad; }
+.message.diff { background: none; }
+
+.deps code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.78rem;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .sprite,
   .sprite *,
+  .hacker,
   .led,
-  .office-map.breach .room-server {
+  .attack-path,
+  .office-map.breach .room-server .wall {
     animation: none !important;
     transition: none !important;
   }

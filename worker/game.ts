@@ -1,11 +1,15 @@
 import type {
   DecisionOption,
+  Dependency,
+  DepVuln,
   Employee,
   MessageKind,
   NewsItem,
   OfficeSpot,
   OpenRisk,
   Presence,
+  StackItem,
+  StackLayer,
   StatKey,
   Stats,
 } from "../shared/types";
@@ -68,22 +72,35 @@ export const EMPLOYEES: Employee[] = [
   },
 ];
 
-// The fictional company's systems. News is matched against these keywords
-// (product name only; versions are not checked in this MVP).
-export const STACK: { name: string; keywords: string[] }[] = [
-  { name: "Next.js / React", keywords: ["next.js", "vercel:next", "react server", "facebook:react", "meta:react"] },
-  { name: "Node.js", keywords: ["node.js", "nodejs:node"] },
-  { name: "nginx", keywords: ["nginx"] },
-  { name: "Ubuntu Linux", keywords: ["linux kernel", "linux:linux_kernel", "canonical:", "ubuntu"] },
-  { name: "PostgreSQL", keywords: ["postgresql"] },
-  { name: "WordPress (เว็บการตลาด)", keywords: ["wordpress"] },
-  { name: "GitHub", keywords: ["github"] },
-  { name: "Redis", keywords: ["redis"] },
-  { name: "OpenSSH", keywords: ["openssh"] },
-  { name: "Chrome (เครื่องพนักงาน)", keywords: ["chrome", "chromium"] },
-  { name: "Windows (เครื่องพนักงาน)", keywords: ["microsoft windows", "microsoft:windows"] },
-  { name: "Fortinet VPN", keywords: ["fortinet", "fortios"] },
+// The fictional company's systems. KEV news is matched against these keywords by
+// product name only; npm dependencies below are checked by exact version via OSV.
+export const STACK: (StackItem & { keywords: string[] })[] = [
+  { name: "Next.js / React", layer: "app", keywords: ["next.js", "vercel:next", "react server", "facebook:react", "meta:react"] },
+  { name: "Node.js", layer: "app", keywords: ["node.js", "nodejs:node"] },
+  { name: "nginx", layer: "edge", keywords: ["nginx"] },
+  { name: "Ubuntu Linux", layer: "host", keywords: ["linux kernel", "linux:linux_kernel", "canonical:", "ubuntu"] },
+  { name: "PostgreSQL", layer: "data", keywords: ["postgresql"] },
+  { name: "WordPress (เว็บการตลาด)", layer: "app", keywords: ["wordpress"] },
+  { name: "GitHub", layer: "ci", keywords: ["github"] },
+  { name: "Redis", layer: "data", keywords: ["redis"] },
+  { name: "OpenSSH", layer: "host", keywords: ["openssh"] },
+  { name: "Chrome (เครื่องพนักงาน)", layer: "endpoint", keywords: ["chrome", "chromium"] },
+  { name: "Windows (เครื่องพนักงาน)", layer: "endpoint", keywords: ["microsoft windows", "microsoft:windows"] },
+  { name: "Fortinet VPN", layer: "edge", keywords: ["fortinet", "fortios"] },
 ];
+
+// package.json of the fictional web app: deliberately old pins, checked against OSV.dev.
+export const DEPENDENCIES: Dependency[] = [
+  { name: "next", version: "14.2.10" },
+  { name: "express", version: "4.18.2" },
+  { name: "axios", version: "1.6.0" },
+  { name: "lodash", version: "4.17.20" },
+  { name: "jsonwebtoken", version: "8.5.1" },
+  { name: "ws", version: "8.11.0" },
+];
+
+export const REGRESSION_CHANCE = 0.3;
+export const REGRESSION_EFFECTS: Partial<Stats> = { uptime: -12, reputation: -5, morale: -5 };
 
 export interface DraftMessage {
   channel: string;
@@ -95,6 +112,8 @@ export interface DraftMessage {
 
 export type SceneEvent =
   | { kind: "news"; news: NewsItem; matched: string[] }
+  | { kind: "dependency"; vuln: DepVuln; currentVersion: string }
+  | { kind: "regression"; pkg: string; version: string }
   | { kind: "breach"; risk: OpenRisk }
   | { kind: "quiet" };
 
@@ -135,6 +154,13 @@ export function eventPresence(event: SceneEvent, previous: PresenceMap): Presenc
   } else if (event.kind === "news" && event.matched.length) {
     next.mai = { spot: "server", activity: "ตรวจช่องโหว่", mood: "😨" };
     next.fah = { spot: "server", activity: "เช็คเวอร์ชันเครื่อง", mood: "😮‍💨" };
+  } else if (event.kind === "dependency") {
+    next.ton = { spot: "desk", activity: "เปิด PR อัปเกรดแพ็กเกจ", mood: "🤓" };
+    next.kan = { spot: "desk", activity: "รีวิว PR แบบไม่เต็มใจ", mood: "🙄" };
+  } else if (event.kind === "regression") {
+    next.kan = { spot: "server", activity: "หาว่าอะไรพัง", mood: "😬" };
+    next.fah = { spot: "server", activity: "เตรียม rollback", mood: "😵" };
+    next.ton = { spot: "desk", activity: "ทำหน้าไม่รู้เรื่อง", mood: "😰" };
   }
   return next;
 }
@@ -142,9 +168,17 @@ export function eventPresence(event: SceneEvent, previous: PresenceMap): Presenc
 export const CHANNELS = ["general", "dev", "security-alerts", "random"];
 const AI_CHANNELS = new Set(["general", "dev", "random", ...EMPLOYEES.map((e) => `dm-${e.id}`)]);
 
-export function matchStack(news: NewsItem): string[] {
+export function matchStackItems(news: NewsItem): StackItem[] {
   const haystack = `${news.name} ${news.products.join(" ")}`.toLowerCase();
-  return STACK.filter((s) => s.keywords.some((k) => haystack.includes(k))).map((s) => s.name);
+  return STACK.filter((s) => s.keywords.some((k) => haystack.includes(k))).map(({ name, layer }) => ({ name, layer }));
+}
+
+export function matchStack(news: NewsItem): string[] {
+  return matchStackItems(news).map((s) => s.name);
+}
+
+export function layerOf(names: string[]): StackLayer {
+  return STACK.find((s) => names.includes(s.name))?.layer ?? "edge";
 }
 
 export function applyEffects(stats: Stats, effects: Partial<Stats>): void {
@@ -206,6 +240,46 @@ export function secBotPosts(news: NewsItem, matched: string[]): DraftMessage[] {
   return [
     { channel: "security-alerts", author: "secbot", kind: "bot", text: facts, link: news.url },
     { channel: "security-alerts", author: "secbot", kind: "bot", text: impact },
+  ];
+}
+
+// OSV facts plus a pull request whose diff is computed from the real fixed version.
+export function secBotDepPosts(vuln: DepVuln, current: string, prNumber: number): DraftMessage[] {
+  const facts = [
+    "🔍 OSV.dev พบช่องโหว่ใน dependency ที่เราใช้อยู่",
+    `${vuln.id}${vuln.aliases.length ? ` / ${vuln.aliases.slice(0, 2).join(", ")}` : ""}`,
+    `แพ็กเกจ: ${vuln.package}@${current}${vuln.severity ? ` · ระดับ ${vuln.severity}` : ""}`,
+    `รายละเอียด: ${truncate(vuln.summary, 300)}`,
+    vuln.fixed ? `แก้แล้วในเวอร์ชัน ${vuln.fixed}` : "ยังไม่มีเวอร์ชันที่แก้",
+  ].join("\n");
+  const posts: DraftMessage[] = [{ channel: "security-alerts", author: "secbot", kind: "bot", text: facts, link: vuln.url }];
+  if (vuln.fixed) {
+    posts.push({
+      channel: "dev",
+      author: "ton",
+      kind: "diff",
+      text: [
+        `PR #${prNumber}: อัปเกรด ${vuln.package} ${current} → ${vuln.fixed} (ปิด ${vuln.id})`,
+        "--- a/package.json",
+        "+++ b/package.json",
+        `   "dependencies": {`,
+        `-    "${vuln.package}": "${current}",`,
+        `+    "${vuln.package}": "${vuln.fixed}",`,
+        "   }",
+      ].join("\n"),
+    });
+  }
+  return posts;
+}
+
+export function regressionPosts(pkg: string, version: string): DraftMessage[] {
+  return [
+    {
+      channel: "dev",
+      author: "system",
+      kind: "system",
+      text: `💥 [เหตุการณ์จำลอง] หลังอัปเกรด ${pkg} เป็น ${version} บางหน้าของระบบใช้งานไม่ได้ (breaking change)\n${formatEffects(REGRESSION_EFFECTS)}`,
+    },
   ];
 }
 
@@ -301,6 +375,23 @@ function describeEvent(event: SceneEvent): string {
   if (event.kind === "breach") {
     return `INCIDENT (simulated): attackers exploited the still-unpatched ${event.risk.newsId} (${event.risk.title}) in our systems.
 The team reacts: panic, blame, incident response. The decision is about incident response trade-offs (all options "patches": false).`;
+  }
+  if (event.kind === "dependency") {
+    const v = event.vuln;
+    return [
+      "NEWS (real, from OSV.dev, about an npm package our app uses):",
+      `id: ${v.id}${v.aliases.length ? ` (${v.aliases.join(", ")})` : ""}`,
+      `package: ${v.package}, our pinned version: ${event.currentVersion}, fixed in: ${v.fixed ?? "no fix yet"}`,
+      `severity: ${v.severity ?? "unknown"}`,
+      `summary: ${truncate(v.summary, 400)}`,
+      `IMPACT: our package.json pins the vulnerable version. Ton (intern) already opened a pull request upgrading ${v.package} to ${v.fixed ?? "a fixed version"}.
+The team argues: merge now (an upgrade can break things), test first, or postpone. Kan must review it.
+Only the option that merges the upgrade has "patches": true.`,
+    ].join("\n");
+  }
+  if (event.kind === "regression") {
+    return `INCIDENT (simulated): right after the CEO approved upgrading ${event.pkg} to ${event.version}, part of the app broke (breaking change).
+The team reacts: blame, rollback or fix-forward debate, someone checks the changelog. The decision is about how to recover (all options "patches": false).`;
   }
   if (event.kind === "quiet") {
     return `NO NEWS TODAY: a normal office day. Create drama from personalities and secret goals (deadlines, salary, gossip, burnout, sales pressure).

@@ -46,7 +46,33 @@ export interface Employee extends PublicEmployee {
   secretGoal: string;
 }
 
-export type MessageKind = "chat" | "bot" | "system";
+// Which part of the fictional company's infrastructure a component belongs to;
+// drives the simulated attack path drawn on the office map.
+export type StackLayer = "edge" | "app" | "host" | "data" | "endpoint" | "ci";
+
+export interface StackItem {
+  name: string;
+  layer: StackLayer;
+}
+
+export interface Dependency {
+  name: string;
+  version: string;
+}
+
+export interface DepVuln {
+  id: string;
+  package: string;
+  summary: string;
+  aliases: string[];
+  severity: string | null;
+  introduced: string | null;
+  fixed: string | null;
+  published: string | null;
+  url: string;
+}
+
+export type MessageKind = "chat" | "bot" | "system" | "diff";
 
 export interface ChatMessage {
   id: number;
@@ -76,6 +102,12 @@ export interface OpenRisk {
   newsId: string;
   title: string;
   since: number;
+  kind: "kev" | "dependency";
+  layer: StackLayer;
+  component: string;
+  // Dependency risks only: the package and the first version that fixes it (from OSV).
+  package?: string;
+  fixedVersion?: string | null;
 }
 
 export interface NewsItem {
@@ -96,7 +128,8 @@ export interface GameState {
   stats: Stats;
   employees: PublicEmployee[];
   presence: Record<string, Presence>;
-  stack: string[];
+  stack: StackItem[];
+  deps: Dependency[];
   messages: ChatMessage[];
   decision: Decision | null;
   openRisks: OpenRisk[];

@@ -3,6 +3,7 @@ import type { ChatMessage, GameState, PublicEmployee } from "../shared/types";
 import { STAT_KEYS, STAT_LABELS } from "../shared/types";
 import { api, ApiError } from "./api";
 import { OfficeMap } from "./OfficeMap";
+import { PixelAvatar } from "./pixel";
 
 const OFFICE = "office";
 const CHANNELS = ["general", "dev", "security-alerts", "random"];
@@ -14,10 +15,10 @@ const SPECIAL_AUTHORS: Record<string, PublicEmployee> = {
 };
 
 function channelLabel(channel: string, employees: PublicEmployee[]): string {
-  if (channel === OFFICE) return "🗺️ แผนผังออฟฟิศ";
+  if (channel === OFFICE) return "แผนผังออฟฟิศ";
   if (channel.startsWith("dm-")) {
     const e = employees.find((x) => `dm-${x.id}` === channel);
-    return e ? `${e.emoji} ${e.name}` : channel;
+    return e ? e.name : channel;
   }
   return `# ${channel}`;
 }
@@ -122,14 +123,26 @@ export function App() {
           ))}
           <div className="section-title">ข้อความส่วนตัว</div>
           {dmChannels.map((c) => (
-            <ChannelButton key={c} id={c} label={channelLabel(c, game.employees)} active={c === channel} unread={unread[c]} onSelect={setChannel} />
+            <ChannelButton key={c} id={c} label={channelLabel(c, game.employees)} avatar={c.slice(3)} active={c === channel} unread={unread[c]} onSelect={setChannel} />
           ))}
         </nav>
         <details className="stack">
           <summary>ระบบของบริษัท ({game.stack.length})</summary>
           <ul>
             {game.stack.map((s) => (
-              <li key={s}>{s}</li>
+              <li key={s.name}>{s.name}</li>
+            ))}
+          </ul>
+        </details>
+        <details className="stack">
+          <summary>package.json ({game.deps.length})</summary>
+          <ul className="deps">
+            {game.deps.map((d) => (
+              <li key={d.name}>
+                <code>
+                  {d.name}@{d.version}
+                </code>
+              </li>
             ))}
           </ul>
         </details>
@@ -275,24 +288,53 @@ function PinScreen({ onUnlocked }: { onUnlocked: () => void }) {
 function ChannelButton(props: {
   id: string;
   label: string;
+  avatar?: string;
   active: boolean;
   unread?: number;
   onSelect: (id: string) => void;
 }) {
   return (
     <button className={`channel ${props.active ? "active" : ""} ${props.unread ? "has-unread" : ""}`} onClick={() => props.onSelect(props.id)}>
-      <span>{props.label}</span>
+      <span className="channel-label">
+        {props.avatar && <PixelAvatar id={props.avatar} size={18} />}
+        {props.label}
+      </span>
       {props.unread ? <span className="badge">{props.unread}</span> : null}
     </button>
   );
 }
 
+function linkLabel(link: string): string {
+  const host = new URL(link).hostname;
+  if (host.endsWith("osv.dev")) return "ดูรายละเอียดบน OSV.dev ↗";
+  if (host.endsWith("nist.gov")) return "ดูรายละเอียดบน NVD ↗";
+  return `ดูรายละเอียดบน ${host} ↗`;
+}
+
+// A pull request message: first line is the title, the rest is a unified diff.
+function Diff({ text }: { text: string }) {
+  const [title, ...lines] = text.split("\n");
+  return (
+    <div className="diff">
+      <p className="diff-title">{title}</p>
+      <pre>
+        {lines.map((line, i) => (
+          <span key={i} className={line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : ""}>
+            {line}
+            {"\n"}
+          </span>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
 function Message({ message, author }: { message: ChatMessage; author?: PublicEmployee }) {
-  const who = author ?? { id: message.author, name: message.author, role: "", emoji: "👤" };
+  const who = author ?? { id: message.author, name: message.author, role: "", emoji: "" };
   return (
     <article className={`message ${message.kind}`}>
       <div className="avatar" aria-hidden="true">
-        {who.emoji}
+        <PixelAvatar id={message.author} size={36} />
       </div>
       <div className="body">
         <div className="meta">
@@ -300,10 +342,10 @@ function Message({ message, author }: { message: ChatMessage; author?: PublicEmp
           {who.role && <span className="role">{who.role}</span>}
           <time>{formatTime(message.ts)}</time>
         </div>
-        <p className="text">{message.text}</p>
+        {message.kind === "diff" ? <Diff text={message.text} /> : <p className="text">{message.text}</p>}
         {message.link && (
           <a href={message.link} target="_blank" rel="noopener noreferrer">
-            ดูรายละเอียดบน NVD ↗
+            {linkLabel(message.link)}
           </a>
         )}
       </div>
