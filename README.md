@@ -26,11 +26,13 @@ npm run db:migrate:local
 npm run dev                 # http://localhost:5173
 ```
 
-## Deploy (ยังไม่ได้ทำ)
+## Deploy
 
-1. `npx wrangler d1 create wedeb-db` แล้วนำ `database_id` ไปใส่ใน `wrangler.jsonc`
-2. `npx wrangler d1 migrations apply wedeb-db --remote`
-3. `npm run build && npx wrangler deploy`
+push เข้า `main` แล้ว Cloudflare Workers Builds จะ build (`npm run build`) และ deploy (`npx wrangler deploy`) ให้อัตโนมัติ
+
+- migration ใหม่ของ D1 ต้องรันเองก่อน push: `npx wrangler d1 migrations apply wedeb-db --remote`
+- secret (`ACCESS_PIN`, `SESSION_SECRET`) เก็บที่ Worker ไม่อยู่ใน repo เปลี่ยนด้วย `npx wrangler secret put <ชื่อ>`
+- repo นี้เป็น public ห้าม commit token, PIN หรือ `.env`
 
 ## หลักที่ต้องยึด
 
