@@ -14,10 +14,12 @@ import type {
   Stats,
 } from "../shared/types";
 import { OFFICE_SPOTS, STAT_KEYS, STAT_LABELS } from "../shared/types";
+import { AiBudgetError, hasAiBudget, markBudgetExhausted, recordNeurons } from "./budget";
 
 export const MODEL = "@cf/google/gemma-4-26b-a4b-it";
-// Keeps one company well inside the free 10,000 neurons/day (~60 neurons per turn).
-export const MAX_ADVANCES_PER_DAY = 20;
+// Workers AI price for MODEL (developers.cloudflare.com/workers-ai/platform/pricing).
+const NEURONS_PER_M_INPUT = 9091;
+const NEURONS_PER_M_OUTPUT = 27273;
 
 export const INITIAL_STATS: Stats = { cash: 70, morale: 65, security: 50, reputation: 60, uptime: 90 };
 
@@ -99,6 +101,10 @@ export const DEPENDENCIES: Dependency[] = [
   { name: "ws", version: "8.11.0" },
 ];
 
+export function defaultDeps(): Record<string, string> {
+  return Object.fromEntries(DEPENDENCIES.map((d) => [d.name, d.version]));
+}
+
 export const REGRESSION_CHANCE = 0.3;
 export const REGRESSION_EFFECTS: Partial<Stats> = { uptime: -12, reputation: -5, morale: -5 };
 
@@ -117,12 +123,13 @@ export type SceneEvent =
   | { kind: "breach"; risk: OpenRisk }
   | { kind: "quiet" };
 
+// Company context is left out for pooled scenes, which are generated ahead of time for any company.
 export interface SceneInput {
-  day: number;
-  stats: Stats;
   event: SceneEvent;
-  recent: string[];
-  openRisks: OpenRisk[];
+  day?: number;
+  stats?: Stats;
+  recent?: string[];
+  openRisks?: OpenRisk[];
 }
 
 export type PresenceMap = Record<string, Presence>;
@@ -414,21 +421,20 @@ The decision is about people or business (all options "patches": false).`;
 }
 
 function scenePrompt(input: SceneInput): string {
-  const stats = STAT_KEYS.map((k) => `${k}=${input.stats[k]}`).join(", ");
-  const risks = input.openRisks.length
-    ? input.openRisks.map((r) => `${r.newsId} (${r.title})`).join("; ")
-    : "none";
+  const { stats, openRisks, recent } = input;
+  const risks = openRisks?.length ? openRisks.map((r) => `${r.newsId} (${r.title})`).join("; ") : "none";
   return [
-    `DAY: ${input.day}`,
-    `COMPANY STATS (0-100): ${stats}`,
+    ...(input.day !== undefined ? [`DAY: ${input.day}`] : []),
+    ...(stats ? [`COMPANY STATS (0-100): ${STAT_KEYS.map((k) => `${k}=${stats[k]}`).join(", ")}`] : []),
     "EMPLOYEES:",
     ...EMPLOYEES.map(
       (e) => `- id=${e.id} | ${e.name} | ${e.role} | personality: ${e.personality} | secret goal: ${e.secretGoal}`,
     ),
     `COMPANY TECH STACK (fictional): ${STACK.map((s) => s.name).join(", ")}`,
-    `OPEN UNPATCHED RISKS: ${risks}`,
-    "RECENT CHAT (for continuity):",
-    ...(input.recent.length ? input.recent : ["(none yet)"]),
+    ...(openRisks ? [`OPEN UNPATCHED RISKS: ${risks}`] : []),
+    ...(recent
+      ? ["RECENT CHAT (for continuity):", ...(recent.length ? recent : ["(none yet)"])]
+      : ["(This scene can be shown at any point in a game: do not refer to earlier chat, the day number or stats.)"]),
     "",
     "EVENT:",
     describeEvent(input.event),
@@ -439,9 +445,16 @@ function scenePrompt(input: SceneInput): string {
 
 export async function generateScene(env: Env, input: SceneInput): Promise<Scene> {
   const raw = await runJson(env, scenePrompt(input), SCENE_SCHEMA, 1800);
+  const scene = parseScene(raw);
+  if (!scene) throw new Error("พนักงาน AI ตอบไม่ครบ ลองกดใหม่อีกครั้ง");
+  return scene;
+}
+
+// Also re-checks pooled scenes read back from D1.
+export function parseScene(raw: unknown): Scene | null {
   const messages = sanitizeMessages(isRecord(raw) ? raw.messages : null);
   const decision = sanitizeDecision(isRecord(raw) ? raw.decision : null);
-  if (!messages.length || !decision) throw new Error("พนักงาน AI ตอบไม่ครบ ลองกดใหม่อีกครั้ง");
+  if (!messages.length || !decision) return null;
   return { messages, decision, presence: sanitizePresence(isRecord(raw) ? raw.presence : null) };
 }
 
@@ -469,21 +482,43 @@ export async function generateAftermath(
   };
 }
 
+// Throws AiBudgetError when the shared daily budget is spent, so callers can fall back to scripted content.
 async function runJson(env: Env, prompt: string, schema: object, maxTokens: number): Promise<unknown> {
+  if (!(await hasAiBudget(env))) throw new AiBudgetError();
   // Model id is newer than the generated binding types, so call through a minimal signature.
   const ai = env.AI as unknown as { run(model: string, input: unknown): Promise<unknown> };
-  const raw = await ai.run(MODEL, {
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: prompt },
-    ],
-    max_tokens: maxTokens,
-    temperature: 0.9,
-    response_format: { type: "json_schema", json_schema: schema },
-    // Gemma 4 thinks by default and can spend the whole token budget before answering.
-    chat_template_kwargs: { enable_thinking: false },
-  });
+  let raw: unknown;
+  try {
+    raw = await ai.run(MODEL, {
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.9,
+      response_format: { type: "json_schema", json_schema: schema },
+      // Gemma 4 thinks by default and can spend the whole token budget before answering.
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    // 3036: the account's real daily allocation is used up (other usage, or our estimate ran low).
+    if (/3036|daily free allocation/i.test(String(err))) {
+      await markBudgetExhausted(env);
+      throw new AiBudgetError();
+    }
+    throw err;
+  }
+  await recordNeurons(env, estimateNeurons(raw, SYSTEM_PROMPT.length + prompt.length, maxTokens));
   return extractJson(raw);
+}
+
+// Uses the token counts Workers AI reports; without them, assumes the worst case
+// (about 2 characters per token for Thai-heavy prompts, and the full output budget).
+function estimateNeurons(raw: unknown, promptChars: number, maxTokens: number): number {
+  const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : {};
+  const input = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : Math.ceil(promptChars / 2);
+  const output = typeof usage.completion_tokens === "number" ? usage.completion_tokens : maxTokens;
+  return (input * NEURONS_PER_M_INPUT + output * NEURONS_PER_M_OUTPUT) / 1_000_000;
 }
 
 function extractJson(raw: unknown): unknown {

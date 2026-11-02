@@ -1,15 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
 import type { ChatMessage, Decision, GameState, MessageKind, OpenRisk, Stats } from "../shared/types";
+import { AiBudgetError, aiBudgetPercentLeft, hasAiBudget } from "./budget";
 import {
   DEPENDENCIES,
   EMPLOYEES,
   INITIAL_STATS,
-  MAX_ADVANCES_PER_DAY,
   REGRESSION_CHANCE,
   REGRESSION_EFFECTS,
   STACK,
   applyEffects,
   checkGameOver,
+  defaultDeps,
   defaultPresence,
   eventPresence,
   formatEffects,
@@ -24,10 +25,21 @@ import {
   welcomePosts,
   type DraftMessage,
   type PresenceMap,
+  type Scene,
   type SceneEvent,
 } from "./game";
 import { getRecentNews } from "./news";
 import { compareVersions, getAffectingVulns } from "./osv";
+import { depPoolKey, getPooledScene, newsPoolKey, pooledKeys } from "./pool";
+import {
+  QUIET_REPEAT_GAP,
+  breachScript,
+  fallbackReactions,
+  pickQuietScript,
+  regressionScript,
+  toScene,
+  type ScriptedScene,
+} from "./scripted";
 
 const BREACH_CHANCE = 0.3;
 const BREACH_EFFECTS: Partial<Stats> = { security: -20, reputation: -15, cash: -10, uptime: -15 };
@@ -46,13 +58,20 @@ interface StoredState {
   decision: Decision | null;
   openRisks: OpenRisk[];
   seenNews: string[];
-  quotaDay: string;
-  quotaUsed: number;
+  // Reactions written in advance for each option of a scripted decision, keyed by option id.
+  scriptedReactions: Record<string, DraftMessage[]> | null;
+  recentScripts: string[];
   gameOver: string | null;
 }
 
-function defaultDeps(): Record<string, string> {
-  return Object.fromEntries(DEPENDENCIES.map((d) => [d.name, d.version]));
+// A news or dependency event that is only committed once a scene for it is available.
+interface EventPlan {
+  event: SceneEvent;
+  posts: DraftMessage[];
+  seenKey: string;
+  risk: OpenRisk | null;
+  poolKey: string | null;
+  isDependency: boolean;
 }
 
 type MessageRow = {
@@ -93,19 +112,16 @@ export class Company extends DurableObject<Env> {
       const s = await this.load();
       if (s.gameOver) throw new Error("เกมจบแล้ว กดเริ่มใหม่ได้เลย");
       if (s.decision) throw new Error("ตัดสินใจเรื่องที่ค้างอยู่ก่อนนะ");
-      const today = new Date().toISOString().slice(0, 10);
-      if (s.quotaDay !== today) {
-        s.quotaDay = today;
-        s.quotaUsed = 0;
-      }
-      if (s.quotaUsed >= MAX_ADVANCES_PER_DAY) {
-        throw new Error(`วันนี้เล่นครบ ${MAX_ADVANCES_PER_DAY} เหตุการณ์แล้ว (โควตา AI ฟรี) กลับมาใหม่พรุ่งนี้นะ`);
-      }
 
       const day = s.day + 1;
       const posts: DraftMessage[] = [];
       let event: SceneEvent = { kind: "quiet" };
       let riskId: string | null = null;
+      let scene: Scene | null = null;
+      let scripted: ScriptedScene | null = null;
+      const aiOk = await hasAiBudget(this.env);
+      const live = (input: { event: SceneEvent; openRisks: OpenRisk[] }) =>
+        aiOk ? liveOrNull(() => generateScene(this.env, { ...input, day, stats: s.stats, recent: this.recentChat(14) })) : null;
 
       // An unpatched, actively exploited vulnerability can turn into a breach on any later turn.
       const breach = s.pendingRegression ? null : s.openRisks.find(() => Math.random() < BREACH_CHANCE);
@@ -116,6 +132,8 @@ export class Company extends DurableObject<Env> {
         applyEffects(s.stats, REGRESSION_EFFECTS);
         posts.push(...regressionPosts(pkg, version));
         event = { kind: "regression", pkg, version };
+        scene = await live({ event, openRisks: s.openRisks });
+        if (!scene) scripted = regressionScript(pkg, version);
       } else if (breach) {
         applyEffects(s.stats, BREACH_EFFECTS);
         s.openRisks = s.openRisks.filter((r) => r.newsId !== breach.newsId);
@@ -126,66 +144,46 @@ export class Company extends DurableObject<Env> {
           text: `🔥 [เหตุการณ์จำลอง] ระบบที่ยังไม่ได้แก้ ${breach.newsId} (${breach.title}) ถูกเจาะแล้ว!\n${formatEffects(BREACH_EFFECTS)}`,
         });
         event = { kind: "breach", risk: breach };
+        scene = await live({ event, openRisks: s.openRisks });
+        if (!scene) scripted = breachScript(breach);
       } else {
-        const fresh = (await getRecentNews(this.env, 40)).filter((n) => !s.seenNews.includes(n.id));
-        const matchedNews = fresh.find((n) => matchStack(n).length);
-        const depVuln = (await getAffectingVulns(this.env, s.deps)).find(
-          (v) => !s.seenNews.includes(`${v.package}:${v.id}`),
-        );
-
-        if (depVuln && (!matchedNews || Math.random() < DEPENDENCY_EVENT_CHANCE)) {
-          const current = s.deps[depVuln.package];
-          s.seenNews = [`${depVuln.package}:${depVuln.id}`, ...s.seenNews].slice(0, 300);
-          s.prCounter += 1;
-          posts.push(...secBotDepPosts(depVuln, current, s.prCounter));
-          s.openRisks.push({
-            newsId: depVuln.id,
-            title: `${depVuln.package}@${current}: ${depVuln.summary.slice(0, 80)}`,
-            since: day,
-            kind: "dependency",
-            layer: "app",
-            component: `npm: ${depVuln.package}`,
-            package: depVuln.package,
-            fixedVersion: depVuln.fixed,
-          });
-          riskId = depVuln.id;
-          event = { kind: "dependency", vuln: depVuln, currentVersion: current };
-        } else {
-          const news = matchedNews ?? fresh[0];
-          if (news) {
-            const items = matchStackItems(news);
-            const matched = items.map((i) => i.name);
-            s.seenNews = [news.id, ...s.seenNews].slice(0, 300);
-            posts.push(...secBotPosts(news, matched));
-            if (items.length) {
-              s.openRisks.push({
-                newsId: news.id,
-                title: news.name,
-                since: day,
-                kind: "kev",
-                layer: items[0].layer,
-                component: items[0].name,
-              });
-              riskId = news.id;
+        const plan = await this.planNewsEvent(s, day, aiOk);
+        if (plan) {
+          // A pooled scene costs no AI; otherwise ask the model while budget remains.
+          scene = plan.poolKey ? await getPooledScene(this.env, plan.poolKey) : null;
+          scene ??= await live({ event: plan.event, openRisks: plan.risk ? [...s.openRisks, plan.risk] : s.openRisks });
+          if (scene) {
+            // Without a scene the event stays unseen and comes back on a later turn.
+            s.seenNews = [plan.seenKey, ...s.seenNews].slice(0, 300);
+            if (plan.isDependency) s.prCounter += 1;
+            if (plan.risk) {
+              s.openRisks.push(plan.risk);
+              riskId = plan.risk.newsId;
             }
-            event = { kind: "news", news, matched };
+            posts.push(...plan.posts);
+            event = plan.event;
           }
+        }
+        if (!scene) {
+          // Quiet office days are always scripted, as are news turns once the AI budget is spent.
+          const quiet = pickQuietScript(s.recentScripts);
+          s.recentScripts = [quiet.id, ...s.recentScripts].slice(0, QUIET_REPEAT_GAP);
+          scripted = quiet;
         }
       }
 
-      // Nothing is persisted until the model answers, so a failed AI call costs the player nothing.
-      const scene = await generateScene(this.env, {
-        day,
-        stats: s.stats,
-        event,
-        recent: this.recentChat(14),
-        openRisks: s.openRisks,
-      });
+      s.scriptedReactions = null;
+      if (scripted) {
+        const built = toScene(scripted);
+        scene = built.scene;
+        s.scriptedReactions = built.reactions;
+      }
+      // Nothing is persisted until a scene exists, so a failed AI call costs the player nothing.
+      if (!scene) throw new Error("พนักงาน AI ตอบไม่ครบ ลองกดใหม่อีกครั้ง");
       posts.push(...scene.messages);
 
       s.presence = mergePresence(eventPresence(event, s.presence), scene.presence);
       s.day = day;
-      s.quotaUsed += 1;
       s.decision = {
         id: crypto.randomUUID(),
         prompt: scene.decision.prompt,
@@ -237,21 +235,28 @@ export class Company extends DurableObject<Env> {
           text: `ผลกระทบ: ${formatEffects(chosen.effects) || "ไม่มี"}${patchNote}`,
         },
       ];
-      try {
-        const aftermath = await generateAftermath(this.env, {
-          prompt: decision.prompt,
-          chosen,
-          others: decision.options.filter((o) => o.id !== chosen.id),
-          recent: this.recentChat(10),
-        });
-        posts.push(...aftermath.messages);
-        s.presence = mergePresence(s.presence, aftermath.presence);
-      } catch (err) {
-        // Reactions are flavour; the decision itself still counts.
-        console.error("aftermath failed", err);
+      const scripted = s.scriptedReactions?.[chosen.id];
+      if (scripted) {
+        posts.push(...scripted);
+      } else {
+        try {
+          const aftermath = await generateAftermath(this.env, {
+            prompt: decision.prompt,
+            chosen,
+            others: decision.options.filter((o) => o.id !== chosen.id),
+            recent: this.recentChat(10),
+          });
+          posts.push(...aftermath.messages);
+          s.presence = mergePresence(s.presence, aftermath.presence);
+        } catch (err) {
+          // Reactions are flavour; the decision itself still counts.
+          if (!(err instanceof AiBudgetError)) console.error("aftermath failed", err);
+          posts.push(...fallbackReactions(chosen));
+        }
       }
 
       s.decision = null;
+      s.scriptedReactions = null;
       s.gameOver = checkGameOver(s.stats);
       this.insert(posts);
       await this.save(s);
@@ -265,6 +270,57 @@ export class Company extends DurableObject<Env> {
       await this.ctx.storage.delete("state");
       return this.view(await this.load());
     });
+  }
+
+  // Picks the next unseen news or dependency event without changing state. Without AI budget,
+  // only events that already have a pooled scene qualify.
+  private async planNewsEvent(s: StoredState, day: number, aiOk: boolean): Promise<EventPlan | null> {
+    const fresh = (await getRecentNews(this.env, 40)).filter((n) => !s.seenNews.includes(n.id));
+    const vulns = (await getAffectingVulns(this.env, s.deps)).filter((v) => !s.seenNews.includes(`${v.package}:${v.id}`));
+    const pooled = await pooledKeys(this.env, [
+      ...fresh.map(newsPoolKey),
+      ...vulns.map((v) => depPoolKey(v, s.deps[v.package])),
+    ]);
+    const usableNews = aiOk ? fresh : fresh.filter((n) => pooled.has(newsPoolKey(n)));
+    const matchedNews = usableNews.find((n) => matchStack(n).length);
+    const depVuln = vulns.find((v) => aiOk || pooled.has(depPoolKey(v, s.deps[v.package])));
+
+    if (depVuln && (!matchedNews || Math.random() < DEPENDENCY_EVENT_CHANCE)) {
+      const current = s.deps[depVuln.package];
+      const poolKey = depPoolKey(depVuln, current);
+      return {
+        event: { kind: "dependency", vuln: depVuln, currentVersion: current },
+        posts: secBotDepPosts(depVuln, current, s.prCounter + 1),
+        seenKey: `${depVuln.package}:${depVuln.id}`,
+        risk: {
+          newsId: depVuln.id,
+          title: `${depVuln.package}@${current}: ${depVuln.summary.slice(0, 80)}`,
+          since: day,
+          kind: "dependency",
+          layer: "app",
+          component: `npm: ${depVuln.package}`,
+          package: depVuln.package,
+          fixedVersion: depVuln.fixed,
+        },
+        poolKey: pooled.has(poolKey) ? poolKey : null,
+        isDependency: true,
+      };
+    }
+
+    const news = matchedNews ?? usableNews[0];
+    if (!news) return null;
+    const items = matchStackItems(news);
+    const matched = items.map((i) => i.name);
+    return {
+      event: { kind: "news", news, matched },
+      posts: secBotPosts(news, matched),
+      seenKey: news.id,
+      risk: items.length
+        ? { newsId: news.id, title: news.name, since: day, kind: "kev", layer: items[0].layer, component: items[0].name }
+        : null,
+      poolKey: pooled.has(newsPoolKey(news)) ? newsPoolKey(news) : null,
+      isDependency: false,
+    };
   }
 
   private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -287,6 +343,8 @@ export class Company extends DurableObject<Env> {
         deps: existing.deps ?? defaultDeps(),
         pendingRegression: existing.pendingRegression ?? null,
         prCounter: existing.prCounter ?? 0,
+        scriptedReactions: existing.scriptedReactions ?? null,
+        recentScripts: existing.recentScripts ?? [],
         openRisks: existing.openRisks.map((r) => ({ ...r, kind: r.kind ?? "kev", layer: r.layer ?? "edge", component: r.component ?? r.title })),
       };
     }
@@ -300,8 +358,8 @@ export class Company extends DurableObject<Env> {
       decision: null,
       openRisks: [],
       seenNews: [],
-      quotaDay: "",
-      quotaUsed: 0,
+      scriptedReactions: null,
+      recentScripts: [],
       gameOver: null,
     };
     this.insert(welcomePosts());
@@ -337,13 +395,12 @@ export class Company extends DurableObject<Env> {
       .map((m) => `#${m.channel} ${m.author}: ${m.text.slice(0, 160)}`);
   }
 
-  private view(s: StoredState): GameState {
+  private async view(s: StoredState): Promise<GameState> {
     const messages: ChatMessage[] = this.sql
       .exec<MessageRow>("SELECT * FROM messages ORDER BY id DESC LIMIT ?", MESSAGE_LIMIT)
       .toArray()
       .reverse()
       .map((m) => ({ ...m, kind: m.kind as MessageKind }));
-    const today = new Date().toISOString().slice(0, 10);
     return {
       day: s.day,
       stats: s.stats,
@@ -354,8 +411,18 @@ export class Company extends DurableObject<Env> {
       messages,
       decision: s.decision,
       openRisks: s.openRisks,
-      advancesLeft: s.quotaDay === today ? Math.max(0, MAX_ADVANCES_PER_DAY - s.quotaUsed) : MAX_ADVANCES_PER_DAY,
+      aiPercentLeft: await aiBudgetPercentLeft(this.env),
       gameOver: s.gameOver,
     };
+  }
+}
+
+// Runs a live AI call, or returns null when the shared daily budget is spent.
+async function liveOrNull(fn: () => Promise<Scene>): Promise<Scene | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof AiBudgetError) return null;
+    throw err;
   }
 }

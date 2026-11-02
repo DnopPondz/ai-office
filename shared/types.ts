@@ -133,6 +133,7 @@ export interface GameState {
   messages: ChatMessage[];
   decision: Decision | null;
   openRisks: OpenRisk[];
-  advancesLeft: number;
+  // Share of today's account-wide AI budget left. At 0 the game keeps going on pooled and scripted scenes.
+  aiPercentLeft: number;
   gameOver: string | null;
 }

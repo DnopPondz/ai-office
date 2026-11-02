@@ -221,10 +221,14 @@ export function App() {
             </div>
           ) : (
             <div className="advance">
-              <button disabled={busy || game.advancesLeft === 0} onClick={() => run(api.advance, true)}>
+              <button disabled={busy} onClick={() => run(api.advance, true)}>
                 {busy ? "กำลังเกิดเหตุการณ์..." : "▶ เหตุการณ์ถัดไป"}
               </button>
-              <small>เหลือวันนี้ {game.advancesLeft} ครั้ง</small>
+              <small>
+                {game.aiPercentLeft > 0
+                  ? `โควตา AI วันนี้เหลือ ${game.aiPercentLeft}%`
+                  : "โควตา AI วันนี้หมดแล้ว เล่นต่อได้ด้วยเหตุการณ์ที่เตรียมไว้ (รีเซ็ต 07:00 น.)"}
+              </small>
             </div>
           )}
           <p className="disclaimer">

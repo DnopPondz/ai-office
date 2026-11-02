@@ -2,6 +2,11 @@ import { handleLogin, isAuthed, readCookie } from "./auth";
 import { Company } from "./company";
 import { ensureFreshNews, getRecentNews, refreshNews } from "./news";
 import { refreshDeps } from "./osv";
+import { fillScenePool } from "./pool";
+
+// Must match the second cron in wrangler.jsonc. Runs apart from the data refresh so each
+// invocation keeps its own CPU and subrequest budget.
+const POOL_CRON = "47 * * * *";
 
 // News and dependency advisories are refreshed by cron, and lazily before a turn as a fallback.
 async function ensureFreshData(env: Env): Promise<void> {
@@ -91,7 +96,16 @@ export default {
     }
   },
 
-  async scheduled(_controller, env, ctx) {
+  async scheduled(controller, env, ctx) {
+    if (controller.cron === POOL_CRON) {
+      ctx.waitUntil(
+        fillScenePool(env).then(
+          (count) => console.log(`scene pool: ${count} scenes added`),
+          (err) => console.error("scene pool fill failed", err),
+        ),
+      );
+      return;
+    }
     ctx.waitUntil(
       Promise.all([
         refreshNews(env, 3).then(
