@@ -1,7 +1,8 @@
-import type { DecisionOption, Employee, RoleKey, Stats } from "../shared/types";
-import { formatBaht, type Business } from "./business";
+import type { Archetype, DecisionOption, Employee, RoleKey, Stats } from "../shared/types";
+import { formatBaht, kpiTarget, roleTitle, type Business } from "./business";
 import type { DraftMessage } from "./game";
-import { ROLES, generateCandidates, holder, renderText } from "./roster";
+import { roleCovers } from "./roles";
+import { generateCandidates, holder, renderText } from "./roster";
 import { newTicket, openTickets, type Ticket, type TicketAction } from "./tickets";
 
 // People management: each employee has their own morale; unhappy people ask for raises and
@@ -14,8 +15,11 @@ const RESIGN_CHANCE = 0.25;
 const RAISE_REQUEST_CHANCE = 0.05;
 const MOOD_DRIFT = 0.1;
 
-// What an empty role costs per game day.
-const VACANCY_DRIFT: Partial<Record<RoleKey, Partial<Stats>>> = {
+// The KPI closes this share of the gap to its staffing target each day.
+const KPI_DRIFT = 0.15;
+
+// What an uncovered job function costs per game day (only functions the business's team covers).
+const VACANCY_DRIFT: Partial<Record<Archetype, Partial<Stats>>> = {
   sec: { security: -1 },
   ops: { uptime: -1 },
   dev: { uptime: -1 },
@@ -52,11 +56,17 @@ export function spreadMorale(staff: Employee[], delta: number): void {
 export function dailyHr(s: HrState, b: Business, usedNames: string[]): { tickets: Ticket[]; posts: DraftMessage[] } {
   const tickets: Ticket[] = [];
   const posts: DraftMessage[] = [];
-  const vacant = (Object.keys(VACANCY_DRIFT) as RoleKey[]).filter((r) => !holder(s.staff, r));
-  for (const role of vacant) {
-    for (const [k, v] of Object.entries(VACANCY_DRIFT[role]!) as [keyof Stats, number][]) s.stats[k] = clamp(s.stats[k] + v);
+  const covered = (a: Archetype) => b.team.some((r) => roleCovers(r, a));
+  const uncovered = (Object.keys(VACANCY_DRIFT) as Archetype[]).filter((a) => covered(a) && !holder(s.staff, a));
+  for (const a of uncovered) {
+    for (const [k, v] of Object.entries(VACANCY_DRIFT[a]!) as [keyof Stats, number][]) s.stats[k] = clamp(s.stats[k] + v);
   }
   for (const e of s.staff) e.morale = clamp(e.morale + (s.stats.morale - e.morale) * MOOD_DRIFT);
+  s.stats.kpi = clamp(s.stats.kpi + (kpiTarget(b, s.staff) - s.stats.kpi) * KPI_DRIFT);
+  // Roles of the starting team nobody holds any more (counting duplicates, e.g. two accountants).
+  const missing = [...new Set(b.team)].filter(
+    (r) => s.staff.filter((e) => e.roleKey === r).length < b.team.filter((x) => x === r).length,
+  );
 
   const all = [...s.tickets];
   for (const e of s.staff) {
@@ -67,7 +77,7 @@ export function dailyHr(s: HrState, b: Business, usedNames: string[]): { tickets
       posts.push(t.message);
     }
   }
-  const asker = s.staff.filter((e) => e.morale < 65 && e.roleKey !== "intern" && !hasTag(all, `raise:${e.id}`));
+  const asker = s.staff.filter((e) => e.morale < 65 && !roleCovers(e.roleKey, "intern") && !hasTag(all, `raise:${e.id}`));
   if (asker.length && Math.random() < RAISE_REQUEST_CHANCE) {
     const e = asker[Math.floor(Math.random() * asker.length)];
     const t = raiseTicket(e, s.staff, s.clock);
@@ -75,9 +85,9 @@ export function dailyHr(s: HrState, b: Business, usedNames: string[]): { tickets
     all.push(t.ticket);
     posts.push(t.message);
   }
-  const toFill = vacant.find((r) => !hasTag(all, `hire:${r}`));
+  const toFill = missing.find((r) => !hasTag(all, `hire:${r}`));
   if (toFill && s.staff.length < MAX_STAFF) {
-    const t = hiringTicket(toFill, s.staff, b, usedNames, s.clock, `ตำแหน่ง ${b.titles[toFill] ?? ROLES[toFill].title} ว่างอยู่`);
+    const t = hiringTicket(toFill, s.staff, b, usedNames, s.clock, `ตำแหน่ง ${roleTitle(toFill, b)} ว่างอยู่`);
     tickets.push(t.ticket);
     posts.push(t.message);
   }
@@ -154,7 +164,7 @@ export function hiringTicket(
 ): { ticket: Ticket; message: DraftMessage } {
   const taken = new Set([...usedNames, ...staff.map((e) => e.name)]);
   const candidates = generateCandidates(role, b, taken, 2 + Math.floor(Math.random() * 2));
-  const title = b.titles[role] ?? ROLES[role].title;
+  const title = roleTitle(role, b);
   const from = holder(staff, "pm") ?? staff[0];
   const opts: DecisionOption[] = candidates.map((c, i) => ({
     id: String.fromCharCode(97 + i),
@@ -189,7 +199,7 @@ export function applyAction(action: TicketAction, s: HrState, b: Business): { po
   switch (action.type) {
     case "hire": {
       if (s.staff.length >= MAX_STAFF) return { posts: [], outcome: "ทีมเต็มแล้ว จ้างเพิ่มไม่ได้" };
-      const c = { ...action.candidate, role: b.titles[action.candidate.roleKey] ?? action.candidate.role };
+      const c = { ...action.candidate, role: roleTitle(action.candidate.roleKey, b) };
       s.staff.push(c);
       return {
         posts: [

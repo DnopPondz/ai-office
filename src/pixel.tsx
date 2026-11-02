@@ -367,3 +367,136 @@ export const BIG_DESK: Rows = [
   legs(30),
 ];
 export const BIG_DESK_PALETTE: Palette = { ...DESK_PALETTE, W: "#8a4f3a", w: "#5f3426" };
+
+// ---------------------------------------------------------------------------
+// Workstations for other kinds of business (same 20 x 12 footprint as DESK)
+
+export const STOVE: Rows = [
+  "...OOOO......OOOO...",
+  "..ORRRRO....OKKKKO..",
+  "..ORRRRO....OKKKKO..",
+  "...OOOO......OOOO...",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OSSSSSSSSSSSSSSSSSSO",
+  "OsKKsKKsssssKKsKKssO",
+  "OSSSSSSSSSSSSSSSSSSO",
+  "OSSOOOOSSSSSSOOOOSSO",
+  "OSSOFFOSSSSSSOFFOSSO",
+  "OSSOOOOSSSSSSOOOOSSO",
+  "OOOOOOOOOOOOOOOOOOOO",
+];
+export const STOVE_PALETTE: Palette = { O: OUTLINE, R: "#b13e53", K: "#333c57", S: "#c2c3c7", s: "#8b8c94", F: "#ef7d57" };
+
+export const DENTAL_CHAIR: Rows = [
+  "..............OOO...",
+  "..............OYO...",
+  "...............O....",
+  "...............O....",
+  "OO.............O....",
+  "OCO............O....",
+  "OCCOOOOOOOOOOO.O....",
+  "OCCCCCCCCCCCCCO.....",
+  ".OCCCCCCCCCCCO......",
+  "......OKKO..........",
+  ".....OKKKKO.........",
+  "....OOOOOOOO........",
+];
+export const DENTAL_CHAIR_PALETTE: Palette = { O: OUTLINE, C: "#41a6a6", Y: "#ffcd75", K: "#566c86" };
+
+export const MACHINE: Rows = [
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OYYYYYYYYYYYYYYYYYYO",
+  "OYKKKKKKKKKKKKKKKKYO",
+  "OYKMMMMKKKKKKLLKKKYO",
+  "OYKMmmMKKKKKKKKKKKYO",
+  "OYKMMMMKKKKKKRRKKKYO",
+  "OYKKKKKKKKKKKKKKKKYO",
+  "OYYYYYYYYYYYYYYYYYYO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OGGGGGGGGGGGGGGGGGGO",
+  "OgOgOgOgOgOgOgOgOgOO",
+  "OOOOOOOOOOOOOOOOOOOO",
+];
+export const MACHINE_PALETTE: Palette = {
+  O: OUTLINE,
+  Y: "#ffcd75",
+  K: "#3a4466",
+  M: "#41a6f6",
+  m: "#a6e3ff",
+  L: "#38b764",
+  R: "#ff004d",
+  G: "#566c86",
+  g: "#333c57",
+};
+
+export const BED: Rows = [
+  "OOOO................",
+  "OWWOOOOOOOOOOOOOOOOO",
+  "OWWOPPPPPPPPPPPPPPPO",
+  "OWWOPPPPPPPPPPPPPPPO",
+  "OWWOBBBBBBBBBBBBBBBO",
+  "OWWOBBBBBBBBBBBBBBBO",
+  "OWWObbbbbbbbbbbbbbbO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OwwwwwwwwwwwwwwwwwwO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  ".OO..............OO.",
+  "....................",
+];
+export const BED_PALETTE: Palette = { O: OUTLINE, W: "#a0714f", w: "#7a5236", P: "#fff1e8", B: "#3b5dc9", b: "#29366f" };
+
+export const PLANTER: Rows = [
+  "..G...G...G...G...G.",
+  ".GGG.GGG.GGG.GGG.GGG",
+  "GGgGGGgGGGgGGGgGGGgG",
+  ".GG..GG..GG..GG..GG.",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OTTTTTTTTTTTTTTTTTTO",
+  "OttttttttttttttttttO",
+  "OTTTTTTTTTTTTTTTTTTO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "BBBBBBBBBBBBBBBBBBBB",
+  "...O..........O.....",
+  "..OLO........OLO....",
+];
+export const PLANTER_PALETTE: Palette = { O: OUTLINE, G: "#38b764", g: "#257179", T: "#7a5236", t: "#5d3a1a", B: "#41a6f6", L: "#ffcd75" };
+
+export const SHELF: Rows = [
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OBBBBOAAAAOBBBBOAAAO",
+  "OBBBBOAAAAOBBBBOAAAO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OAAAOBBBBBOAAAOBBBBO",
+  "OAAAOBBBBBOAAAOBBBBO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "OBBBBBOAAAAAOBBBBBBO",
+  "OBBBBBOAAAAAOBBBBBBO",
+  "OOOOOOOOOOOOOOOOOOOO",
+  "O..................O",
+  "OO................OO",
+];
+export const SHELF_PALETTE: Palette = { O: OUTLINE, B: "#b86f50", A: "#ef7d57" };
+// Parcel lockers: the same frame with grey doors.
+export const LOCKER_PALETTE: Palette = { O: OUTLINE, B: "#94b0c2", A: "#566c86" };
+
+export const TREADMILL: Rows = [
+  "..............OOO...",
+  "..............OMO...",
+  "..............OOO...",
+  "...............O....",
+  "...............O....",
+  "...............O....",
+  "OOOOOOOOOOOOOOOOO...",
+  "OKKKKKKKKKKKKKKKO...",
+  "OkkkkkkkkkkkkkkkOO..",
+  "OOOOOOOOOOOOOOOOOOO.",
+  ".OO............OO...",
+  "....................",
+];
+export const TREADMILL_PALETTE: Palette = { O: OUTLINE, M: "#41a6f6", K: "#333c57", k: "#566c86" };
+
+export const CRATE: Rows = box(12, 8, "B", "b");
+export const CRATE_PALETTE: Palette = { O: OUTLINE, B: "#b86f50", b: "#7a5236" };
+
+export const POOL: Rows = box(64, 22, "W", "w");
+export const POOL_PALETTE: Palette = { O: "#c2c3c7", W: "#41a6f6", w: "#29adff" };

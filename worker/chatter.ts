@@ -1,5 +1,6 @@
 import type { Employee, OfficeSpot, RoleKey } from "../shared/types";
 import type { DraftMessage, PresenceMap } from "./game";
+import { roleCovers } from "./roles";
 import { renderText } from "./roster";
 
 // Background small talk while the player is online: pre-written, no AI, so the office feels
@@ -58,7 +59,9 @@ const BY_ROLE: Record<RoleKey, Line[]> = {
 export function chatterLine(staff: Employee[], mood: (e: Employee) => string): { post: DraftMessage; presence: Partial<PresenceMap> } | null {
   if (!staff.length) return null;
   const speaker = staff[Math.floor(Math.random() * staff.length)];
-  const lines = [...ANYONE, ...BY_ROLE[speaker.roleKey]];
+  // Roles without their own lines (a chef, a dentist...) use the shared ones plus their job function's.
+  const own = BY_ROLE[speaker.roleKey] ?? Object.entries(BY_ROLE).find(([a]) => roleCovers(speaker.roleKey, a))?.[1] ?? [];
+  const lines = [...ANYONE, ...own];
   for (let tries = 0; tries < 5; tries++) {
     const line = lines[Math.floor(Math.random() * lines.length)];
     const text = renderText(line.text, staff, speaker);

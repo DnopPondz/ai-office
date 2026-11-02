@@ -4,6 +4,7 @@ import { companyDeps, getBusiness, type Business } from "./business";
 import { generateScene, matchStack, parseScene, type DraftMessage, type PresenceMap, type Scene, type SceneEvent } from "./game";
 import { getRecentNews } from "./news";
 import { getAffectingVulns } from "./osv";
+import { ROLES } from "./roles";
 import { holder, isRoleKey, renderText, roleCast } from "./roster";
 
 // Scenes for news and dependency events are generated ahead of time by cron, from quota that
@@ -18,7 +19,7 @@ const LATE_HOUR_UTC = 20;
 const POOL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const ACTIVE_FOR_MS = 3 * 24 * 60 * 60 * 1000;
 // Bumped when the stored scene format changes; older rows are ignored and pruned.
-const POOL_VERSION = "v3";
+const POOL_VERSION = "v4";
 
 export function newsPoolKey(business: string, news: NewsItem): string {
   return `${POOL_VERSION}:${business}:news:${news.id}`;
@@ -60,8 +61,8 @@ export async function pooledKeys(env: Env, keys: string[]): Promise<Set<string>>
   return found;
 }
 
-// Role ids are the same for every business, so any role cast can re-check a stored scene.
-const PARSE_CAST = roleCast(getBusiness("saas"));
+// Authors of stored scenes are role ids; a cast with every role in the catalog can re-check any of them.
+const PARSE_CAST = roleCast({ ...getBusiness("saas"), team: Object.keys(ROLES) });
 
 // Pooled scenes are kept after use: other companies, and this one after a reset, can still play them.
 export async function getPooledScene(env: Env, key: string, staff: Employee[]): Promise<Scene | null> {

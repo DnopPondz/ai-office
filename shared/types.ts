@@ -1,9 +1,10 @@
 // Types shared by the Worker (API) and the React UI.
 
-export type StatKey = "cash" | "morale" | "security" | "reputation" | "uptime";
+// "kpi" is the business-specific measure (food quality, patient satisfaction...); its label comes from the business.
+export type StatKey = "cash" | "morale" | "security" | "reputation" | "uptime" | "kpi";
 export type Stats = Record<StatKey, number>;
 
-export const STAT_KEYS: StatKey[] = ["cash", "morale", "security", "reputation", "uptime"];
+export const STAT_KEYS: StatKey[] = ["cash", "morale", "security", "reputation", "uptime", "kpi"];
 
 export const STAT_LABELS: Record<StatKey, string> = {
   cash: "เงินสด",
@@ -11,6 +12,7 @@ export const STAT_LABELS: Record<StatKey, string> = {
   security: "ความปลอดภัย",
   reputation: "ชื่อเสียง",
   uptime: "Uptime",
+  kpi: "ตัวชี้วัดธุรกิจ",
 };
 
 // Where an employee physically is on the office map.
@@ -46,13 +48,19 @@ export interface PublicEmployee {
   role: string;
   emoji: string;
   avatar?: AvatarSpec;
+  roleKey?: RoleKey;
   salary?: number; // baht per month
   morale?: number; // 0-100, this person only
   level?: number; // 1 junior, 2 senior, 3 lead
 }
 
 // The job an employee fills; scripted scenes and pooled scenes are written against these.
-export type RoleKey = "dev" | "sec" | "sales" | "ops" | "intern" | "pm";
+// The six job functions every scripted scene and game rule is written against. Each role
+// (a chef, a dentist, IT Support...) covers zero or more of them.
+export type Archetype = "dev" | "sec" | "sales" | "ops" | "intern" | "pm";
+
+// A role id from the role catalog (worker/roster.ts), e.g. "chef" or "dev".
+export type RoleKey = string;
 
 // How someone talks, so the model and scripted lines use the same particles for them.
 export interface Speech {
@@ -166,6 +174,12 @@ export interface NewsItem {
 export interface CompanyInfo {
   name: string;
   business: string;
+  kpiLabel: string;
+  // Office map style, e.g. "kitchen" for a restaurant.
+  theme: string;
+  // Roles this company can hire, and which of them push the KPI.
+  hireRoles: { id: RoleKey; title: string }[];
+  kpiRoles: RoleKey[];
 }
 
 // stats.cash is in baht; the other stats are 0-100.

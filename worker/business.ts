@@ -1,4 +1,5 @@
 import type { Dependency, Employee, RoleKey, StackItem, Stats } from "../shared/types";
+import { ROLES, roleCovers } from "./roles";
 
 // The kinds of startup a new company can be. Each one decides the tech stack (which real KEV
 // news hits it), the npm dependencies (which OSV advisories hit it), job titles, money and
@@ -13,6 +14,13 @@ export interface Business {
   pitch: string;
   names: string[];
   titles: Partial<Record<RoleKey, string>>;
+  // Starting roster (role ids, may repeat) and the extra roles the player can recruit.
+  team: RoleKey[];
+  hireable: RoleKey[];
+  // Office map style.
+  theme: string;
+  // The business's own 0-100 measure: which roles push it, and how the game ends at zero.
+  kpi: { label: string; start: number; ending: string; weights: Partial<Record<RoleKey, number>> };
   stack: StackDef[];
   packages: string[];
   salaryScale: number;
@@ -25,7 +33,7 @@ export interface Business {
   software: number;
   // Day-to-day business problems, in English, so the model writes scenes about this business.
   concerns: string;
-  stats: Omit<Stats, "cash">;
+  stats: Omit<Stats, "cash" | "kpi">;
 }
 
 // One pinned version per package across every business, because dep_vulns stores a single
@@ -112,6 +120,10 @@ const S = {
 export const BUSINESSES: Business[] = [
   {
     id: "saas",
+    team: ["dev", "sec", "ops", "sales", "pm", "cs"],
+    hireable: ["intern", "designer"],
+    theme: "office",
+    kpi: { label: "ความพอใจลูกค้า", start: 60, ending: "ลูกค้าองค์กรยกเลิกสัญญาจนหมด บริษัทไปต่อไม่ได้ 📉", weights: { cs: 15, pm: 8, dev: 8, sales: 4 } },
     software: 1,
     concerns: "enterprise customer churn, feature requests from big clients, uptime SLAs, customers' security reviews",
     label: "SaaS ขายระบบให้องค์กร",
@@ -128,12 +140,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "clinic",
+    team: ["dentist", "nurse", "receptionist", "itsupport", "pm", "intern"],
+    hireable: ["dentist", "nurse", "accountant", "sec", "dev"],
+    theme: "clinic",
+    kpi: { label: "ความพึงพอใจคนไข้", start: 70, ending: "คนไข้หนีไปคลินิกอื่นหมด ต้องปิดคลินิก 🦷", weights: { dentist: 15, nurse: 8, receptionist: 6, pm: 4 } },
     software: 0.2,
     concerns: "appointment no-shows, dentists' schedules, patient privacy (PDPA), equipment costs, online reviews",
     label: "คลินิกทันตกรรมหลายสาขา",
     pitch: "multi-branch dental clinic with online booking; holds patient records and X-ray images (sensitive personal data under Thailand's PDPA)",
     names: ["ยิ้มสวยเดนทัล", "ฟันดีคลินิก", "SmilePlus Dental", "บ้านหมอฟัน", "เดนทัลแคร์สยาม", "Happy Teeth"],
-    titles: { dev: "Developer", sales: "ฝ่ายประสานงานคนไข้", ops: "IT Support", pm: "ผู้จัดการคลินิก" },
+    titles: { dev: "Developer", sales: "ฝ่ายประสานงานคนไข้", ops: "IT Support", pm: "ผู้จัดการคลินิก", intern: "ผู้ช่วยฝึกหัด" },
     stack: [S.windows, S.chrome, S.exchange, S.sonicwall, S.nas, S.cctv, { ...S.wordpress, name: "WordPress (ระบบนัดออนไลน์)" }, S.mysql, S.github, S.node],
     packages: ["express", "jsonwebtoken", "multer", "moment", "nodemailer", "lodash"],
     salaryScale: 0.9,
@@ -144,6 +160,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "ecommerce",
+    team: ["dev", "itsupport", "sales", "warehouse", "cs", "pm"],
+    hireable: ["sec", "ops", "designer", "intern"],
+    theme: "warehouse",
+    kpi: { label: "ความพอใจลูกค้า", start: 65, ending: "ลูกค้าเลิกสั่งเพราะของช้าและรีวิวแย่ ร้านต้องปิดตัว 📦", weights: { warehouse: 12, cs: 10, dev: 5, sales: 4 } },
     software: 0.7,
     concerns: "flash sales, shipping delays, returns and fake reviews, ad spend, payment fraud",
     label: "ร้านเสื้อผ้าออนไลน์",
@@ -160,6 +180,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "fintech",
+    team: ["dev", "sec", "ops", "sales", "pm", "compliance"],
+    hireable: ["cs", "intern", "designer"],
+    theme: "office",
+    kpi: { label: "ความเชื่อมั่นผู้ใช้", start: 55, ending: "ผู้ใช้ถอนเงินออกหมด และหน่วยงานกำกับสั่งระงับบริการ 🏦", weights: { compliance: 12, sec: 8, cs: 8, pm: 4 } },
     software: 1,
     concerns: "regulator rules, scams targeting users, transaction limits, partner banks, app store reviews",
     label: "e-wallet / fintech",
@@ -176,6 +200,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "logistics",
+    team: ["dispatcher", "itsupport", "sales", "pm", "warehouse", "intern"],
+    hireable: ["dispatcher", "dev", "accountant"],
+    theme: "warehouse",
+    kpi: { label: "ส่งตรงเวลา", start: 60, ending: "ส่งช้าจนลูกค้ารายใหญ่ย้ายไปเจ้าอื่นหมด 🚚", weights: { dispatcher: 14, warehouse: 10, pm: 5 } },
     software: 0.5,
     concerns: "late deliveries, rider pay and protests, fuel costs, lost parcels, hub capacity",
     label: "บริษัทขนส่งพัสดุด่วน",
@@ -192,6 +220,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "gamestudio",
+    team: ["dev", "artist", "sec", "ops", "sales", "pm"],
+    hireable: ["intern", "designer", "artist", "cs"],
+    theme: "office",
+    kpi: { label: "ความสนุกของเกม", start: 60, ending: "ผู้เล่นเลิกเล่นจนเซิร์ฟเวอร์ร้าง ต้องปิดเกม 🎮", weights: { artist: 12, dev: 10, pm: 5, intern: 3 } },
     software: 0.9,
     concerns: "the player community, in-game events, monetization backlash, cheaters, launch deadlines",
     label: "สตูดิโอเกมมือถือ",
@@ -208,12 +240,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "smartfarm",
+    team: ["agronomist", "dev", "itsupport", "sales", "pm", "intern"],
+    hireable: ["agronomist", "ops", "sec"],
+    theme: "farm",
+    kpi: { label: "ผลผลิตลูกค้า", start: 60, ending: "ผลผลิตในสวนลูกค้าเสียหายหนัก เกษตรกรเลิกใช้ระบบ 🌱", weights: { agronomist: 14, dev: 6, itsupport: 5 } },
     software: 0.5,
     concerns: "harvest season, farmers' cash flow, broken field devices, weather, distributors",
     label: "Smart farm / IoT เกษตร",
     pitch: "IoT sensors and automatic irrigation for durian orchards and greenhouses; hundreds of field devices and cameras",
     names: ["ฟาร์มฉลาด", "ทุเรียนเทค", "GreenSense", "สวนดีไอโอที", "AgriThai Tech", "น้ำหยดอัจฉริยะ"],
-    titles: { dev: "IoT Developer", sales: "ฝ่ายขายเกษตรกร", ops: "Field Engineer" },
+    titles: { dev: "IoT Developer", sales: "ฝ่ายขายเกษตรกร", itsupport: "Field Engineer / IT" },
     stack: [S.iotRouter, S.cctv, { ...S.linux, name: "Linux (Raspberry Pi ในสวน)" }, S.nginx, S.postgres, S.node, S.github, S.chrome, S.windows, S.openssh],
     packages: ["express", "ws", "axios", "lodash", "jsonwebtoken", "minimist"],
     salaryScale: 0.8,
@@ -224,6 +260,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "edtech",
+    team: ["tutor", "dev", "itsupport", "sales", "pm", "cs"],
+    hireable: ["tutor", "sec", "designer", "intern"],
+    theme: "office",
+    kpi: { label: "คุณภาพการสอน", start: 65, ending: "ผู้ปกครองยกเลิกคอร์สกันหมด แพลตฟอร์มต้องปิดตัว 📚", weights: { tutor: 14, pm: 6, cs: 5, dev: 4 } },
     software: 0.8,
     concerns: "exam season, parents' complaints, tutors' contracts, content quality, school partnerships",
     label: "แพลตฟอร์มเรียนออนไลน์",
@@ -240,12 +280,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "hotel",
+    team: ["receptionist", "housekeeping", "chef", "itsupport", "sales", "pm"],
+    hireable: ["accountant", "intern", "chef", "housekeeping"],
+    theme: "hotel",
+    kpi: { label: "รีวิวแขก", start: 70, ending: "รีวิวแย่จนไม่มีแขกจอง รีสอร์ทต้องปิด 🏝️", weights: { housekeeping: 10, receptionist: 8, chef: 8, pm: 4 } },
     software: 0.2,
     concerns: "high and low season occupancy, booking-site commissions, guest complaints and reviews, staff turnover, weddings and events",
     label: "กลุ่มรีสอร์ทริมทะเล",
     pitch: "beach resort group with an online booking engine, guest data and front-desk systems; busy high season",
     names: ["ทะเลใสรีสอร์ท", "Andaman Breeze", "บ้านริมหาด", "Lanta Hideaway", "ภูผาวิลล่า", "Coral Bay Stay"],
-    titles: { sales: "Revenue Manager", ops: "IT Manager", pm: "Guest Experience Manager" },
+    titles: { sales: "Revenue Manager", ops: "IT Manager", receptionist: "Front Office", pm: "ผู้จัดการรีสอร์ท" },
     stack: [S.opera, S.exchange, S.fortinet, S.windows, S.chrome, { ...S.wordpress, name: "WordPress (เว็บจองห้อง)" }, S.mysql, S.cctv, S.papercut, S.github],
     packages: ["express", "axios", "moment", "nodemailer", "lodash", "ejs"],
     salaryScale: 0.85,
@@ -256,12 +300,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "restaurant",
+    team: ["chef", "branchmgr", "sales", "itsupport", "accountant", "intern"],
+    hireable: ["chef", "branchmgr", "cs"],
+    theme: "kitchen",
+    kpi: { label: "คุณภาพอาหาร", start: 65, ending: "คุณภาพอาหารตกจนลูกค้าเลิกมา ต้องปิดร้าน 🍽️", weights: { chef: 16, branchmgr: 8, intern: 2 } },
     software: 0.2,
     concerns: "food costs and suppliers, staff shortages at branches, delivery-app commissions, health inspections, menu changes, reviews",
     label: "เชนร้านอาหาร",
     pitch: "restaurant chain with POS tablets in every branch, delivery app integrations and a loyalty app",
     names: ["ข้าวมันไก่เฮียตี๋", "ส้มตำแซ่บนัว", "Noodle Nation", "ครัวคุณยาย", "หมูกระทะบุฟเฟ่ต์ดี", "Kafe Ka-Nom"],
-    titles: { dev: "Developer", sales: "Marketing", ops: "IT Support", pm: "Operations Manager" },
+    titles: { dev: "Developer", sales: "Marketing", ops: "IT Support", pm: "Operations Manager", intern: "พนักงานฝึกหัด" },
     stack: [{ ...S.windows, name: "Windows (เครื่อง POS)" }, { ...S.android, name: "แท็บเล็ต POS (Android)" }, S.sonicwall, S.iotRouter, S.cctv, S.mssql, S.chrome, S.nginx, S.github, S.node],
     packages: ["express", "axios", "socket.io", "moment", "jsonwebtoken", "lodash"],
     salaryScale: 0.8,
@@ -272,6 +320,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "media",
+    team: ["reporter", "pm", "dev", "sales", "itsupport", "designer"],
+    hireable: ["reporter", "sec", "intern"],
+    theme: "office",
+    kpi: { label: "ความน่าเชื่อถือของข่าว", start: 65, ending: "ข่าวผิดซ้ำๆ จนไม่มีใครเชื่อ ผู้ลงโฆษณาถอนหมด 📰", weights: { reporter: 10, pm: 10, designer: 3 } },
     software: 0.6,
     concerns: "ad revenue, corrections and fake news, viral stories, editors' workload, social media algorithm changes",
     label: "สำนักข่าวออนไลน์",
@@ -288,6 +340,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "accounting",
+    team: ["accountant", "accountant", "sales", "itsupport", "pm", "intern"],
+    hireable: ["accountant", "sec"],
+    theme: "office",
+    kpi: { label: "งานเสร็จทันกำหนด", start: 70, ending: "ส่งงบลูกค้าไม่ทันจนโดนปรับ และลูกค้าย้ายหนีหมด 🧾", weights: { accountant: 12, pm: 5, intern: 2 } },
     software: 0.2,
     concerns: "tax season deadlines, clients' missing documents, staff overtime, new regulations, keeping big clients",
     label: "สำนักงานบัญชีและที่ปรึกษาภาษี",
@@ -304,6 +360,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "fitness",
+    team: ["trainer", "dev", "itsupport", "sales", "pm", "cs"],
+    hireable: ["trainer", "sec", "designer"],
+    theme: "gym",
+    kpi: { label: "ความพอใจสมาชิก", start: 70, ending: "สมาชิกยกเลิกกันหมด สตูดิโอเงียบจนต้องปิด 🏋️", weights: { trainer: 14, cs: 6, dev: 4 } },
     software: 0.8,
     concerns: "membership churn, trainers, wearable partners, influencer marketing, users' health data",
     label: "แอปฟิตเนสและสตูดิโอ",
@@ -320,12 +380,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "condo",
+    team: ["pm", "technician", "receptionist", "itsupport", "accountant", "intern"],
+    hireable: ["technician", "sec"],
+    theme: "condo",
+    kpi: { label: "ความพอใจลูกบ้าน", start: 65, ending: "ลูกบ้านรวมตัวเปลี่ยนบริษัทบริหารอาคาร 🏢", weights: { technician: 12, receptionist: 6, pm: 6 } },
     software: 0.3,
     concerns: "residents' complaints, parcel lockers, maintenance contractors, common fees, security guards",
     label: "บริหารคอนโดอัจฉริยะ",
     pitch: "smart condo management: keycards, CCTV, a resident app and parcel lockers across several buildings",
     names: ["คอนโดสบาย", "Smart Living TH", "บ้านฉลาด", "The Nest Residence", "อยู่ดีคอนโด", "UrbanKey"],
-    titles: { dev: "Developer", sales: "Customer Relations", ops: "Building IT", pm: "Property Manager" },
+    titles: { dev: "Developer", sales: "Customer Relations", ops: "Building IT", pm: "Property Manager", receptionist: "ฝ่ายลูกบ้านสัมพันธ์" },
     stack: [S.cctv, S.iotRouter, S.android, S.ios, S.windows, S.chrome, S.nas, S.nginx, S.postgres, S.github],
     packages: ["express", "axios", "ws", "jsonwebtoken", "moment", "tough-cookie"],
     salaryScale: 0.8,
@@ -336,12 +400,16 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "factory",
+    team: ["engineer", "linelead", "purchaser", "safety", "itsupport", "sales"],
+    hireable: ["engineer", "accountant", "intern", "sec", "dev"],
+    theme: "factory",
+    kpi: { label: "กำลังการผลิต", start: 65, ending: "ไลน์ผลิตส่งของไม่ได้ ค่ายรถยกเลิกออร์เดอร์ทั้งหมด 🏭", weights: { engineer: 12, linelead: 10, purchaser: 4, safety: 3 } },
     software: 0.2,
     concerns: "production targets, machine downtime, supplier delays, worker safety, car makers' audits",
     label: "โรงงานผลิตชิ้นส่วนรถยนต์",
     pitch: "auto parts factory: production lines run on PLC/SCADA, plus an ERP and a supplier portal",
     names: ["สยามออโต้พาร์ท", "ไทยชิ้นส่วนยนต์", "Eastern Gear Works", "อะไหล่ดีการช่าง", "Rayong Precision", "ProParts Thailand"],
-    titles: { dev: "ERP Developer", sales: "Sales Engineer", ops: "OT Engineer", pm: "Plant Manager" },
+    titles: { dev: "ERP Developer", sales: "Sales Engineer", pm: "Plant Manager", itsupport: "OT / IT Engineer" },
     stack: [S.sap, S.citrix, S.vmware, S.windows, S.chrome, S.scada, S.mssql, S.fortinet, S.veeam, S.github],
     packages: ["express", "axios", "xml2js", "lodash", "moment", "jsonwebtoken"],
     salaryScale: 1,
@@ -352,6 +420,10 @@ export const BUSINESSES: Business[] = [
   },
   {
     id: "insurance",
+    team: ["adjuster", "sales", "dev", "sec", "pm", "cs"],
+    hireable: ["adjuster", "compliance", "intern"],
+    theme: "office",
+    kpi: { label: "ความพอใจลูกค้า", start: 60, ending: "ลูกค้าร้องเรียนเรื่องเคลมจนถูกสั่งระงับการขาย 📉", weights: { adjuster: 12, cs: 8, pm: 4 } },
     software: 0.6,
     concerns: "claim disputes, fraudulent claims, agents' commissions, regulator rules, price competition",
     label: "โบรกเกอร์ประกันภัยออนไลน์",
@@ -393,14 +465,34 @@ export function companyDeps(b: Business): Record<string, string> {
 
 export const DAYS_PER_MONTH = 5;
 
-const BASE_SALARY: Record<RoleKey, number> = { dev: 65000, sec: 70000, sales: 40000, ops: 55000, intern: 12000, pm: 60000 };
-
 function round1000(n: number): number {
   return Math.round(n / 1000) * 1000;
 }
 
 export function baseSalary(role: RoleKey, b: Business): number {
-  return round1000(BASE_SALARY[role] * b.salaryScale);
+  return round1000((ROLES[role]?.salary ?? 30000) * b.salaryScale);
+}
+
+export function roleTitle(role: RoleKey, b: Business): string {
+  return b.titles[role] ?? ROLES[role]?.title ?? role;
+}
+
+export function hireRoles(b: Business): RoleKey[] {
+  return [...new Set([...b.team, ...b.hireable])];
+}
+
+const LEVEL_FACTOR: Record<number, number> = { 1: 0.8, 2: 1, 3: 1.25 };
+
+// How much one employee pushes the KPI: their role's weight, scaled by level and mood.
+function kpiPush(b: Business, role: RoleKey, level: number, morale: number): number {
+  return (b.kpi.weights[role] ?? 0) * (LEVEL_FACTOR[level] ?? 1) * (0.6 + 0.4 * (morale / 100));
+}
+
+// Where the KPI drifts each day given who is on staff; the starting team holds it at kpi.start.
+export function kpiTarget(b: Business, staff: Employee[]): number {
+  const startPush = b.team.reduce((sum, r) => sum + kpiPush(b, r, ROLES[r]?.startLevel ?? 2, 70), 0);
+  const push = staff.reduce((sum, e) => sum + kpiPush(b, e.roleKey, e.level, e.morale), 0);
+  return Math.max(0, Math.min(100, Math.round(b.kpi.start - startPush + push)));
 }
 
 // Salaries vary up to 15% around the business's base.
@@ -419,15 +511,16 @@ export function monthlyCost(b: Business, staff: Employee[]): number {
   return staff.reduce((sum, e) => sum + (e.salary ?? 0), 0) + b.fixedCost;
 }
 
-// Revenue tracks reputation and uptime; at the starting stats it is about margin x costs.
-// Without anyone in sales it drops by a quarter; each extra salesperson adds 10%.
+// Revenue tracks reputation, uptime and the business KPI; at the starting stats it is about
+// margin x costs. Without anyone selling it drops by a quarter; each extra seller adds 10%.
 export function monthlyRevenue(b: Business, stats: Stats, staff?: Employee[]): number {
-  const basePayroll = (Object.keys(BASE_SALARY) as RoleKey[]).reduce((sum, r) => sum + baseSalary(r, b), 0);
-  const factor = (rep: number, up: number) => (0.6 + 0.8 * (rep / 100)) * (0.5 + 0.5 * (up / 100));
-  const base = ((basePayroll + b.fixedCost) * b.margin) / factor(b.stats.reputation, b.stats.uptime);
-  const sales = staff ? staff.filter((e) => e.roleKey === "sales").length : 1;
+  const basePayroll = b.team.reduce((sum, r) => sum + baseSalary(r, b), 0);
+  const factor = (rep: number, up: number, kpi: number) =>
+    (0.6 + 0.8 * (rep / 100)) * (0.5 + 0.5 * (up / 100)) * (0.6 + 0.8 * (kpi / 100));
+  const base = ((basePayroll + b.fixedCost) * b.margin) / factor(b.stats.reputation, b.stats.uptime, b.kpi.start);
+  const sales = staff ? staff.filter((e) => roleCovers(e.roleKey, "sales")).length : 1;
   const salesFactor = sales === 0 ? 0.75 : 1 + 0.1 * (sales - 1);
-  return round1000(base * factor(stats.reputation, stats.uptime) * salesFactor);
+  return round1000(base * factor(stats.reputation, stats.uptime, stats.kpi ?? b.kpi.start) * salesFactor);
 }
 
 export function formatBaht(n: number): string {

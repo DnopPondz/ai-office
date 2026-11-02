@@ -8,10 +8,12 @@ import {
   companyDeps,
   formatBaht,
   getBusiness,
+  hireRoles,
   monthlyCost,
   monthlyRevenue,
   randomBusiness,
   randomCompanyName,
+  roleTitle,
   type Business,
 } from "./business";
 import { chatterLine, reminderLine, sadLine } from "./chatter";
@@ -45,7 +47,7 @@ import { MAX_STAFF, applyAction, dailyHr, fire, hiringTicket, spreadMorale } fro
 import { ensureFreshNews, getRecentNews } from "./news";
 import { compareVersions, getAffectingVulns } from "./osv";
 import { depPoolKey, getPooledScene, markBusinessActive, newsPoolKey, pooledKeys } from "./pool";
-import { LEGACY_STAFF, NAME_MEMORY, generateStaff, isRoleKey, renderText } from "./roster";
+import { LEGACY_STAFF, NAME_MEMORY, generateStaff, renderText } from "./roster";
 import {
   QUIET_REPEAT_GAP,
   breachScript,
@@ -224,7 +226,7 @@ export class Company extends DurableObject<Env> {
       const b = getBusiness(s.businessId);
       s.lastSeen = Date.now();
       if (action === "hire") {
-        if (!target.role || !isRoleKey(target.role)) throw new Error("ไม่รู้จักตำแหน่งนี้");
+        if (!target.role || !hireRoles(b).includes(target.role)) throw new Error("ธุรกิจนี้ไม่มีตำแหน่งนี้");
         if (s.staff.length >= MAX_STAFF) throw new Error(`ทีมเต็มแล้ว (${MAX_STAFF} คน)`);
         if (openTickets(s.tickets).some((t) => t.tag === `hire:${target.role}`)) throw new Error("กำลังเปิดรับสมัครตำแหน่งนี้อยู่แล้ว ดูใน Inbox");
         const t = hiringTicket(target.role, s.staff, b, [], s.clock, "เปิดรับสมัครตามที่ CEO สั่ง");
@@ -255,7 +257,7 @@ export class Company extends DurableObject<Env> {
       } else {
         throw new Error("ไม่รู้จักคำสั่งนี้");
       }
-      s.gameOver = checkGameOver(s.stats);
+      s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
     });
     return this.view(s, since);
   }
@@ -376,7 +378,7 @@ export class Company extends DurableObject<Env> {
       s.nextEventAt = s.clock + jitter(EVENT_EVERY_MS);
       s.jobs.push({ type: "event" });
     }
-    s.gameOver = checkGameOver(s.stats);
+    s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
   }
 
   // ---------------------------------------------------------------------------
@@ -403,7 +405,7 @@ export class Company extends DurableObject<Env> {
       const person = s.staff.find((e) => e.id === t.from);
       if (person) person.morale = Math.min(100, person.morale + 5);
     }
-    const effects = formatEffects(choice.effects, unit);
+    const effects = formatEffects(choice.effects, unit, b.kpi.label);
     t.status = "done";
     t.closedAt = s.clock;
     t.outcome = `${choice.label}${effects ? ` · ${effects}` : ""}${note}`;
@@ -412,7 +414,7 @@ export class Company extends DurableObject<Env> {
     posts.push({ channel, author: "system", kind: "system", text: `ผลกระทบ: ${effects || "ไม่มี"}${note}` });
     const scripted = choice.optionId ? t.reactions?.[choice.optionId] : undefined;
     if (scripted) posts.push(...scripted);
-    s.gameOver = checkGameOver(s.stats);
+    s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
     return !scripted && !action && choice.optionId !== null;
   }
 
@@ -430,7 +432,7 @@ export class Company extends DurableObject<Env> {
       const worst = worstOption(t.options);
       const effects: Partial<Stats> = { ...worst.effects, morale: (worst.effects.morale ?? 0) - 3 };
       this.applyEffects(s, effects, unit);
-      outcome = `ทีมตัดสินใจกันเอง: ${worst.label} · ${formatEffects(effects, unit)}`;
+      outcome = `ทีมตัดสินใจกันเอง: ${worst.label} · ${formatEffects(effects, unit, b.kpi.label)}`;
       const risk = t.newsId ? s.openRisks.find((r) => r.newsId === t.newsId) : undefined;
       if (risk) {
         risk.ignored = true;
@@ -449,7 +451,7 @@ export class Company extends DurableObject<Env> {
     t.closedAt = s.clock;
     t.outcome = outcome;
     posts.push({ channel: ticketChannel(t), author: "system", kind: "system", text: `⏰ ไม่ได้ตอบทันเวลา: ${t.subject}\n${outcome}` });
-    s.gameOver = checkGameOver(s.stats);
+    s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
   }
 
   // Closes the risk behind a ticket; dependency fixes upgrade the package (and may break things).
@@ -563,7 +565,7 @@ export class Company extends DurableObject<Env> {
           channel: "security-alerts",
           author: "system",
           kind: "system",
-          text: `🔥 [เหตุการณ์จำลอง] ระบบที่ยังไม่ได้แก้ ${risk.newsId} (${risk.title}) ถูกเจาะแล้ว!\n${formatEffects(BREACH_EFFECTS, unit)}`,
+          text: `🔥 [เหตุการณ์จำลอง] ระบบที่ยังไม่ได้แก้ ${risk.newsId} (${risk.title}) ถูกเจาะแล้ว!\n${formatEffects(BREACH_EFFECTS, unit, b.kpi.label)}`,
         });
       } else if (plan) {
         if (s.seenNews.includes(plan.seenKey)) return;
@@ -590,7 +592,7 @@ export class Company extends DurableObject<Env> {
       const { ticket, notice } = sceneToTicket(finalScene, event, s.staff, s.clock, { newsId: riskId, reactions });
       s.tickets.push(ticket);
       posts.push(notice);
-      s.gameOver = checkGameOver(s.stats);
+      s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
     });
   }
 
@@ -599,14 +601,18 @@ export class Company extends DurableObject<Env> {
     const s0 = await this.load();
     let messages: DraftMessage[] = [];
     let presence: Partial<PresenceMap> = {};
+    let personas: Record<string, { personality: string; secretGoal: string }> = {};
     try {
       const r = await generateWelcome(this.env, this.chatContext(s0));
       messages = r.messages;
       presence = r.presence;
+      personas = r.personas;
     } catch (err) {
       if (!(err instanceof AiBudgetError)) console.error("welcome failed", err);
     }
     await this.mutate((s, posts) => {
+      // Model-written personalities replace the drafts picked from the role's pool.
+      for (const e of s.staff) if (personas[e.id]) Object.assign(e, personas[e.id]);
       posts.push(...(messages.length >= 2 ? messages : welcomeLines(s.staff)));
       s.presence = mergePresence(s.presence, presence);
     });
@@ -805,7 +811,7 @@ export class Company extends DurableObject<Env> {
       businessId: b.id,
       companyName: randomCompanyName(b),
       staff,
-      stats: { ...b.stats, cash: b.startCash },
+      stats: { ...b.stats, kpi: b.kpi.start, cash: b.startCash },
       presence: defaultPresence(staff),
       deps: companyDeps(b),
       pendingRegression: null,
@@ -884,7 +890,14 @@ export class Company extends DurableObject<Env> {
     return {
       epoch: s.epoch,
       day: s.day,
-      company: { name: s.companyName, business: b.label },
+      company: {
+        name: s.companyName,
+        business: b.label,
+        kpiLabel: b.kpi.label,
+        theme: b.theme,
+        hireRoles: hireRoles(b).map((id) => ({ id, title: roleTitle(id, b) })),
+        kpiRoles: Object.keys(b.kpi.weights),
+      },
       money: {
         monthlyRevenue: monthlyRevenue(b, s.stats, s.staff),
         monthlyCost: monthlyCost(b, s.staff),
@@ -892,7 +905,7 @@ export class Company extends DurableObject<Env> {
       },
       stats: s.stats,
       // Personality, secret goal and speech stay server-side.
-      employees: s.staff.map(({ id, name, role, emoji, avatar, salary, morale, level }) => ({ id, name, role, emoji, avatar, salary, morale, level })),
+      employees: s.staff.map(({ id, name, role, roleKey, emoji, avatar, salary, morale, level }) => ({ id, name, role, roleKey, emoji, avatar, salary, morale, level })),
       presence: s.presence,
       stack: b.stack.map(({ name, layer }) => ({ name, layer })),
       deps: Object.entries(s.deps).map(([name, version]) => ({ name, version })),
@@ -950,7 +963,11 @@ function migrate(existing: StoredState & { decision?: LegacyDecision | null; scr
     businessId: b.id,
     companyName: existing.companyName ?? "ออฟฟิศ AI",
     // Before baht, cash was a 0-100 bar that started at 70; 70 maps to the starting cash.
-    stats: legacyCash ? { ...existing.stats, cash: Math.round((existing.stats.cash / 70) * b.startCash) } : existing.stats,
+    stats: {
+      ...existing.stats,
+      cash: legacyCash ? Math.round((existing.stats.cash / 70) * b.startCash) : existing.stats.cash,
+      kpi: existing.stats.kpi ?? b.kpi.start,
+    },
     staff,
     presence: existing.presence ?? defaultPresence(staff),
     deps: existing.deps ?? companyDeps(b),

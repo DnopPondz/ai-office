@@ -20,14 +20,6 @@ const SPECIAL_AUTHORS: Record<string, PublicEmployee> = {
 };
 
 const LEVELS: Record<number, string> = { 1: "Junior", 2: "Senior", 3: "Lead" };
-const HIRE_ROLES: [string, string][] = [
-  ["dev", "Developer"],
-  ["sec", "Security"],
-  ["ops", "DevOps / IT"],
-  ["sales", "Sales / ลูกค้าสัมพันธ์"],
-  ["pm", "Product / Manager"],
-  ["intern", "Intern"],
-];
 
 function channelLabel(channel: string, employees: PublicEmployee[]): string {
   if (channel === OFFICE) return "แผนผังออฟฟิศ";
@@ -241,8 +233,8 @@ export function App() {
           <div className="stats">
             <CashStat game={game} />
             {STAT_KEYS.filter((k) => k !== "cash").map((k) => (
-              <div key={k} className="stat" title={`${STAT_LABELS[k]} ${game.stats[k]}/100`}>
-                <span>{STAT_LABELS[k]}</span>
+              <div key={k} className={`stat ${k === "kpi" ? "kpi" : ""}`} title={`${k === "kpi" ? game.company.kpiLabel : STAT_LABELS[k]} ${game.stats[k]}/100`}>
+                <span>{k === "kpi" ? game.company.kpiLabel : STAT_LABELS[k]}</span>
                 <div className="bar">
                   <div className={`fill ${game.stats[k] < 25 ? "low" : ""}`} style={{ width: `${game.stats[k]}%` }} />
                 </div>
@@ -263,6 +255,7 @@ export function App() {
 
         {channel === OFFICE ? (
           <OfficeMap
+            theme={game.company.theme}
             employees={game.employees}
             presence={game.presence}
             messages={messages}
@@ -461,7 +454,8 @@ function TeamView(props: {
   onAction: (action: "raise" | "promote" | "fire" | "hire", target: { employeeId?: string; role?: string }) => Promise<boolean>;
 }) {
   const { game } = props;
-  const [role, setRole] = useState(HIRE_ROLES[0][0]);
+  const [role, setRole] = useState(game.company.hireRoles[0]?.id ?? "");
+  const kpiRoles = new Set(game.company.kpiRoles);
   const payroll = game.employees.reduce((sum, e) => sum + (e.salary ?? 0), 0);
   const full = game.employees.length >= game.maxStaff;
   return (
@@ -475,6 +469,7 @@ function TeamView(props: {
             <PixelAvatar id={e.id} size={40} />
             <div className="team-info">
               <b>{e.name}</b> <span className="roster-role">{e.role} · {LEVELS[e.level ?? 2]}</span>
+              {e.roleKey && kpiRoles.has(e.roleKey) && <span className="kpi-tag">ดัน{game.company.kpiLabel}</span>}
               <small>เงินเดือน {formatBaht(e.salary ?? 0)} บาท</small>
               <div className="stat morale" title={`ขวัญกำลังใจ ${e.morale ?? 0}/100`}>
                 <span>ขวัญกำลังใจ</span>
@@ -509,9 +504,10 @@ function TeamView(props: {
         <p className="roster-role">ผู้สมัครจะส่งมาเป็นอีเมลใน Inbox ให้เลือกจ้าง</p>
         <div className="hire-row">
           <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="ตำแหน่งที่จะรับสมัคร">
-            {HIRE_ROLES.map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
+            {game.company.hireRoles.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.title}
+                {kpiRoles.has(r.id) ? ` (ดัน${game.company.kpiLabel})` : ""}
               </option>
             ))}
           </select>

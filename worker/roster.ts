@@ -1,80 +1,11 @@
 import type { AvatarSpec, Employee, RoleKey, Speech } from "../shared/types";
-import { baseSalary, getBusiness, randomSalary, type Business } from "./business";
+import { baseSalary, getBusiness, randomSalary, roleTitle, type Business } from "./business";
+import { ROLES, isRoleToken, roleCovers } from "./roles";
 
 // Each company gets its own randomly generated staff. Scripted and pooled scenes are written
-// against roles ({dev}, {sec}, ...) and cast onto whoever holds that role.
+// against archetypes ({dev}, {sec}, ...) or role ids ({chef}) and cast onto whoever covers them.
 
-interface RoleDef {
-  title: string;
-  emoji: string;
-  personalities: string[];
-  secretGoals: string[];
-}
-
-export const ROLES: Record<RoleKey, RoleDef> = {
-  dev: {
-    title: "Senior Dev",
-    emoji: "👨‍💻",
-    personalities: [
-      "เก่งมากแต่ขี้เกียจ patch ชอบพูดว่า 'เดี๋ยวค่อยทำ' ประชดเก่ง",
-      "เพอร์เฟกชันนิสต์ ไม่ยอมปล่อยงานถ้าไม่มี test ชอบบ่นเรื่องโค้ดคนอื่น",
-      "สายลุย deploy วันศุกร์เย็นเป็นประจำ มั่นใจในตัวเองสูง",
-    ],
-    secretGoals: ["อยากเป็น Tech Lead และคุมทีมเอง", "อยากได้สิทธิ์ทำงานจากบ้านถาวร"],
-  },
-  sec: {
-    title: "Security Engineer",
-    emoji: "🛡️",
-    personalities: [
-      "ระแวงทุกอย่าง ชอบพูดว่า 'บอกแล้ว' ใช้อีโมจิเยอะเวลาตกใจ",
-      "ใจเย็น ทำตามมาตรฐานเป๊ะ ชอบอ้าง NIST กับ CIS Controls",
-      "อดีตสาย CTF มุกตลกร้าย มองทุกระบบเป็นโจทย์ที่ต้องเจาะ",
-    ],
-    secretGoals: ["อยากได้งบ security เพิ่มเป็นสองเท่า ใช้ทุกเหตุการณ์เป็นข้ออ้าง", "อยากได้เป็น CISO ของบริษัท"],
-  },
-  sales: {
-    title: "Sales",
-    emoji: "💼",
-    personalities: [
-      "มองทุกอย่างเป็นยอดขาย ไม่ยอมให้ระบบล่มแม้แต่นาทีเดียว พูดภาษาเซลส์",
-      "พูดเก่ง รับปากลูกค้าไว้ก่อนแล้วค่อยมาคิดว่าจะทำยังไง",
-      "บ้าตัวเลข ทำ spreadsheet ทุกเรื่อง วัดผลทุกอย่างเป็นเงิน",
-    ],
-    secretGoals: ["ต้องปิดดีลลูกค้ารายใหญ่ให้ได้ในไตรมาสนี้ ไม่งั้นโดนตัดคอมมิชชั่น", "อยากได้หุ้นบริษัท"],
-  },
-  ops: {
-    title: "DevOps",
-    emoji: "⚙️",
-    personalities: [
-      "ทำงานหนักจนใกล้หมดไฟ ตอบสั้น เหนื่อย แต่รับผิดชอบสูง",
-      "คลั่ง automation อยากให้ทุกอย่างเป็นสคริปต์ หงุดหงิดเวลามีคนทำมือ",
-      "ชอบเป็นฮีโร่ตอนระบบล่ม แอบสนุกกับ incident มากเกินไป",
-    ],
-    secretGoals: ["อยากให้ CEO เห็นคุณค่าและขึ้นเงินเดือน ถ้าไม่ได้จะลาออก", "อยากได้คนมาช่วยเข้าเวร on-call"],
-  },
-  intern: {
-    title: "Intern",
-    emoji: "🐣",
-    personalities: [
-      "กระตือรือร้น ซื่อ กดทุกอย่าง ถามเยอะ บางทีทำพังโดยไม่ตั้งใจ",
-      "เงียบๆ แต่เก่งเกินตำแหน่ง แอบแก้บั๊กที่คนอื่นไม่กล้าแตะ",
-      "ติดโซเชียล อยากโพสต์ทุกอย่างที่เกิดในออฟฟิศ",
-    ],
-    secretGoals: ["อยากได้บรรจุเป็นพนักงานประจำ พยายามทำตัวให้เด่น", "อยากเป็น influencer สาย tech"],
-  },
-  pm: {
-    title: "Product Manager",
-    emoji: "📋",
-    personalities: [
-      "สุภาพต่อหน้า การเมืองเก่ง ชอบโยนความผิดอย่างแนบเนียน",
-      "คลั่ง roadmap เขียนเอกสารทุกเรื่อง ประชุมบ่อยมาก",
-      "ขี้เกรงใจ รับปากทุกคน จนงานล้นทีม",
-    ],
-    secretGoals: ["อยากเป็น CEO แทน กำลังเก็บหลักฐานความผิดพลาดของ CEO", "อยากย้ายไปบริษัทใหญ่ กำลังสร้างผลงานไว้ใส่ portfolio"],
-  },
-};
-
-export const ROLE_KEYS = Object.keys(ROLES) as RoleKey[];
+export { ROLES } from "./roles";
 
 // Secret goals any role can have, mixed in with the role's own.
 const SHARED_GOALS = [
@@ -116,8 +47,8 @@ function randomAvatar(role: RoleKey): AvatarSpec {
   const looks = [pick(HAIR)];
   if (Math.random() < 0.3) looks.push("glasses");
   // Accessories that suit the job, sometimes.
-  if (role === "sales" && Math.random() < 0.6) looks.push("tie");
-  else if (role === "ops" && Math.random() < 0.6) looks.push("headset");
+  if (roleCovers(role, "sales") && Math.random() < 0.6) looks.push("tie");
+  else if ((roleCovers(role, "ops") || role === "dispatcher" || role === "cs") && Math.random() < 0.6) looks.push("headset");
   else if (Math.random() < 0.1) looks.push(pick(["tie", "headset"]));
   return {
     looks,
@@ -133,18 +64,15 @@ function randomSpeech(name: string): Speech {
   return { self: "เรา", end: "", ask: "" };
 }
 
-// A new company's staff, one per role, with names the player has not seen recently.
+// A new company's staff: the business's starting team, with names the player has not seen recently.
 export function generateStaff(recentNames: string[], business: Business): Employee[] {
   const taken = new Set(recentNames);
-  return ROLE_KEYS.map((roleKey) => {
+  return business.team.map((roleKey) => {
     const person = newEmployee(roleKey, business, taken);
     taken.add(person.name);
     return person;
   });
 }
-
-// Interns start junior; everyone else is hired at senior level.
-const START_LEVEL: Record<RoleKey, number> = { dev: 2, sec: 2, sales: 1, ops: 2, intern: 1, pm: 2 };
 
 function newEmployee(roleKey: RoleKey, business: Business, taken: Set<string>): Employee {
   let pool = NAMES.filter((n) => !taken.has(n));
@@ -154,7 +82,7 @@ function newEmployee(roleKey: RoleKey, business: Business, taken: Set<string>): 
   return {
     id: `e${crypto.randomUUID().replace(/-/g, "").slice(0, 7)}`,
     name,
-    role: business.titles[roleKey] ?? role.title,
+    role: roleTitle(roleKey, business),
     emoji: role.emoji,
     roleKey,
     personality: pick(role.personalities),
@@ -163,7 +91,7 @@ function newEmployee(roleKey: RoleKey, business: Business, taken: Set<string>): 
     avatar: randomAvatar(roleKey),
     salary: randomSalary(roleKey, business),
     morale: 60 + Math.floor(Math.random() * 21),
-    level: START_LEVEL[roleKey],
+    level: role.startLevel,
   };
 }
 
@@ -212,17 +140,17 @@ function legacy(
     avatar: { looks, palette },
     salary: baseSalary(roleKey, getBusiness("saas")),
     morale: 70,
-    level: START_LEVEL[roleKey],
+    level: role.startLevel,
   };
 }
 
 // Stand-in staff for pooled scenes, which are shared by every company of a business: ids are role
-// keys and names are {role} placeholders, filled in with the real names when a company plays it.
+// ids and names are {role} placeholders, filled in with the real names when a company plays it.
 export function roleCast(business: Business): Employee[] {
-  return ROLE_KEYS.map((roleKey) => ({
+  return [...new Set(business.team)].map((roleKey) => ({
     id: roleKey,
     name: `{${roleKey}}`,
-    role: business.titles[roleKey] ?? ROLES[roleKey].title,
+    role: roleTitle(roleKey, business),
     emoji: ROLES[roleKey].emoji,
     roleKey,
     personality: "ตามบทบาทของตำแหน่ง",
@@ -235,24 +163,28 @@ export function roleCast(business: Business): Employee[] {
   }));
 }
 
-export function holder(staff: Employee[], role: RoleKey): Employee | undefined {
-  return staff.find((e) => e.roleKey === role);
+// The first employee who holds a role id or covers an archetype ("sec" finds IT Support too).
+export function holder(staff: Employee[], token: string): Employee | undefined {
+  return staff.find((e) => e.roleKey === token) ?? staff.find((e) => roleCovers(e.roleKey, token));
 }
 
-export function isRoleKey(value: string): value is RoleKey {
-  return value in ROLES;
+export function isRoleKey(value: string): boolean {
+  return isRoleToken(value);
 }
+
+// Who plays which token in a scene; a script casts distinct people so nobody talks to themselves.
+export type Cast = Record<string, Employee>;
 
 // Fills {role} with that employee's name and {I}/{end}/{ask} with the speaker's own speech.
 // Returns null when the text needs a role the company does not have.
-export function renderText(text: string, staff: Employee[], speaker?: Employee): string | null {
+export function renderText(text: string, staff: Employee[], speaker?: Employee, cast?: Cast): string | null {
   let missing = false;
   const out = text.replace(/\{(\w+)\}/g, (token, key: string) => {
     if (speaker && key === "I") return speaker.speech.self;
     if (speaker && key === "end") return speaker.speech.end;
     if (speaker && key === "ask") return speaker.speech.ask;
-    if (!isRoleKey(key)) return token;
-    const person = holder(staff, key);
+    if (!isRoleToken(key)) return token;
+    const person = cast?.[key] ?? holder(staff, key);
     if (!person) missing = true;
     return person?.name ?? "";
   });

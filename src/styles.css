@@ -530,6 +530,19 @@ button:disabled {
   color: var(--muted);
 }
 
+.kpi-tag {
+  justify-self: start;
+  background: #2a2340;
+  color: #c9b8ff;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+}
+
+.stat.kpi .fill {
+  background: #8b5cf6;
+}
+
 .team-info .morale {
   max-width: 240px;
 }

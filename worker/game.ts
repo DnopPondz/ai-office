@@ -14,7 +14,7 @@ import type {
 } from "../shared/types";
 import { OFFICE_SPOTS, STAT_KEYS, STAT_LABELS } from "../shared/types";
 import { AiBudgetError, hasAiBudget, markBudgetExhausted, recordNeurons } from "./budget";
-import { cashUnit as cashUnitOf, formatBaht, type Business, type StackDef } from "./business";
+import { cashUnit as cashUnitOf, formatBaht, roleTitle, type Business, type StackDef } from "./business";
 import { holder, speechNote } from "./roster";
 
 export const MODEL = "@cf/google/gemma-4-26b-a4b-it";
@@ -120,17 +120,19 @@ export function applyEffects(stats: Stats, effects: Partial<Stats>, cashUnit: nu
   }
 }
 
-export function formatEffects(effects: Partial<Stats>, cashUnit: number): string {
+export function formatEffects(effects: Partial<Stats>, cashUnit: number, kpiLabel: string = STAT_LABELS.kpi): string {
   return STAT_KEYS.filter((k) => effects[k])
     .map((k) => {
       const v = effects[k]!;
       const sign = v > 0 ? "+" : "-";
-      return k === "cash" ? `${STAT_LABELS[k]} ${sign}${formatBaht(Math.abs(v) * cashUnit)}` : `${STAT_LABELS[k]} ${v > 0 ? "+" : ""}${v}`;
+      const label = k === "kpi" ? kpiLabel : STAT_LABELS[k];
+      return k === "cash" ? `${label} ${sign}${formatBaht(Math.abs(v) * cashUnit)}` : `${label} ${v > 0 ? "+" : ""}${v}`;
     })
     .join(" · ");
 }
 
-export function checkGameOver(stats: Stats): string | null {
+export function checkGameOver(stats: Stats, kpiEnding = "ธุรกิจหลักพังจนลูกค้าหนีหมด 📉"): string | null {
+  if (stats.kpi <= 0) return kpiEnding;
   if (stats.cash <= 0) return "เงินหมด บริษัทต้องปิดตัว 💸";
   if (stats.morale <= 0) return "พนักงานลาออกยกทีม 🚪";
   if (stats.reputation <= 0) return "ลูกค้าหนีหมด ไม่มีใครเชื่อใจบริษัทอีกแล้ว 📉";
@@ -224,8 +226,8 @@ ceo (in the CEO's office), lounge (sofa corner), away (out of the office).
 const SCENE_RULES = `Write 6 to 10 messages across at least 3 channels, including at least one DM to the CEO.
 Then write ONE decision for the CEO: a short Thai question and exactly 3 options. The question is the game's narration,
 not an employee speaking: no polite particles (no ครับ, ค่ะ, คะ).
-Each option has a short Thai label, integer effects between -25 and 25 for any of cash, morale, security, reputation, uptime
-(cash is in cash points, see CASH),
+Each option has a short Thai label, integer effects between -25 and 25 for any of cash, morale, security, reputation, uptime, kpi
+(cash is in cash points, see CASH; kpi is the BUSINESS KPI),
 and "patches": true only if that option actually fixes or mitigates the news risk.
 Options must be real trade-offs; no option is strictly best.
 ${PRESENCE_RULES}`;
@@ -335,6 +337,12 @@ It does not have to involve IT or code. The decision is about the business or th
   return `${block}\n${impact}`;
 }
 
+// The business KPI as the model sees it: "kpi" in stats and effects.
+function kpiLine(b: Business): string {
+  const drivers = Object.keys(b.kpi.weights).map((r) => roleTitle(r, b)).join(", ");
+  return `BUSINESS KPI ("kpi" in stats and effects): ${b.kpi.label}. It rises with good work by: ${drivers}.`;
+}
+
 function scenePrompt(input: SceneInput): string {
   const { stats, openRisks, recent, business, money } = input;
   const risks = openRisks?.length ? openRisks.map((r) => `${r.newsId} (${r.title})`).join("; ") : "none";
@@ -347,6 +355,7 @@ function scenePrompt(input: SceneInput): string {
     ...(stats
       ? [`COMPANY STATS (0-100): ${STAT_KEYS.filter((k) => k !== "cash").map((k) => `${k}=${stats[k]}`).join(", ")}`]
       : []),
+    kpiLine(business),
     `CASH: ${stats ? `${Math.round(stats.cash)} THB. ` : ""}One cash point in effects = ${unit} THB.${
       money ? ` Monthly revenue about ${money.revenue} THB, monthly costs about ${money.cost} THB.` : ""
     }`,
@@ -427,6 +436,7 @@ function contextLines(c: ChatContext): string[] {
   return [
     `COMPANY: "${c.companyName}", a ${c.business.pitch}.`,
     `COMPANY STATS (0-100): ${STAT_KEYS.filter((k) => k !== "cash").map((k) => `${k}=${c.stats[k]}`).join(", ")}`,
+    kpiLine(c.business),
     `CASH: ${Math.round(c.stats.cash)} THB. Monthly revenue about ${c.money.revenue} THB, monthly costs about ${c.money.cost} THB.`,
     `BUSINESS CONCERNS: ${c.business.concerns}`,
     `COMPANY TECH STACK (fictional): ${c.business.stack.map((s) => s.name).join(", ")}`,
@@ -466,20 +476,63 @@ export async function generateChatReply(
 }
 
 // First messages of a new company, so every start feels different.
-export async function generateWelcome(env: Env, input: ChatContext): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
+const WELCOME_SCHEMA = {
+  type: "object",
+  properties: {
+    personas: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { employee: { type: "string" }, personality: { type: "string" }, secretGoal: { type: "string" } },
+        required: ["employee", "personality", "secretGoal"],
+      },
+    },
+    messages: MESSAGE_SCHEMA,
+    presence: PRESENCE_SCHEMA,
+  },
+  required: ["personas", "messages", "presence"],
+};
+
+export interface Persona {
+  personality: string;
+  secretGoal: string;
+}
+
+// First messages of a new company, so every start feels different. The model also gives each
+// employee their own personality and secret goal (the listed ones are only drafts), and the
+// greetings are written in those new personalities.
+export async function generateWelcome(
+  env: Env,
+  input: ChatContext,
+): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap>; personas: Record<string, Persona> }> {
   const prompt = [
     ...contextLines(input),
     "",
+    'First, write "personas": for every employee, a fresh Thai personality (one sentence, specific and a bit quirky, fitting their job in this business) and a secret goal (one short Thai sentence). Use the listed ones only as drafts; make each person feel unique.',
+    "Then:",
     "THE NEW CEO STARTS TODAY.",
     'Write 4 to 6 short first messages: a few employees greet the new CEO in "general", one or two talk in "dev" or "random", and at least one sends the CEO a private DM ("dm-<their id>").',
     "Each speaks in character and in role, so their personalities show, and secret goals leak only as hints. They may mention the business, the company's numbers or its systems.",
-    "Make it specific to this company and team, not a generic greeting. No decisions.",
+    "Make it specific to this company and team, not a generic greeting, and true to the new personas. No decisions.",
     PRESENCE_RULES,
   ].join("\n");
-  const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 800);
+  const raw = await runJson(env, prompt, WELCOME_SCHEMA, 1400);
+  const personas: Record<string, Persona> = {};
+  if (isRecord(raw) && Array.isArray(raw.personas)) {
+    for (const item of raw.personas) {
+      if (!isRecord(item)) continue;
+      const id = resolveEmployee(item.employee, input.staff);
+      const personality = typeof item.personality === "string" ? item.personality.trim() : "";
+      const secretGoal = typeof item.secretGoal === "string" ? item.secretGoal.trim() : "";
+      if (id && personality.length >= 8 && secretGoal.length >= 6) {
+        personas[id] = { personality: truncate(personality, 160), secretGoal: truncate(secretGoal, 120) };
+      }
+    }
+  }
   return {
     messages: sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).slice(0, 6),
     presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
+    personas,
   };
 }
 
@@ -672,12 +725,15 @@ function sanitizePresence(raw: unknown, staff: Employee[]): Partial<PresenceMap>
 function resolveEmployee(value: unknown, staff: Employee[]): string | null {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
-  return staff.find((e) => e.id === v || e.name === value.trim())?.id ?? null;
+  // The model sometimes names a job function ("sec") instead of an id; take whoever covers it.
+  return staff.find((e) => e.id === v || e.name === value.trim())?.id ?? holder(staff, v)?.id ?? null;
 }
 
 function resolveChannel(value: unknown, staff: Employee[]): string {
   const v = typeof value === "string" ? value.trim().toLowerCase().replace(/^#/, "") : "";
-  return ["general", "dev", "random"].includes(v) || staff.some((e) => v === `dm-${e.id}`) ? v : "general";
+  if (["general", "dev", "random"].includes(v)) return v;
+  const dmWith = v.startsWith("dm-") ? resolveEmployee(v.slice(3), staff) : null;
+  return dmWith ? `dm-${dmWith}` : "general";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

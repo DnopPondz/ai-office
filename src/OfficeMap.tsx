@@ -2,8 +2,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, OfficeSpot, OpenRisk, Presence, PublicEmployee, StackLayer } from "../shared/types";
 import { SPOT_LABELS } from "../shared/types";
 import {
+  BED,
+  BED_PALETTE,
   BIG_DESK,
   BIG_DESK_PALETTE,
+  CRATE,
+  CRATE_PALETTE,
+  DENTAL_CHAIR,
+  DENTAL_CHAIR_PALETTE,
+  LOCKER_PALETTE,
+  MACHINE,
+  MACHINE_PALETTE,
+  PLANTER,
+  PLANTER_PALETTE,
+  POOL,
+  POOL_PALETTE,
+  SHELF,
+  SHELF_PALETTE,
+  STOVE,
+  STOVE_PALETTE,
+  TREADMILL,
+  TREADMILL_PALETTE,
   COFFEE,
   COFFEE_PALETTE,
   COUNTER,
@@ -26,6 +45,8 @@ import {
   WHITEBOARD,
   WHITEBOARD_PALETTE,
   characterFrames,
+  type Palette,
+  type Rows,
 } from "./pixel";
 
 type MapSpot = Exclude<OfficeSpot, "away">;
@@ -90,6 +111,69 @@ const FLOORS: Record<MapSpot, [string, string]> = {
   lounge: ["#2f4a3a", "#294234"],
 };
 
+// Each kind of business dresses the same floor plan differently: room names, floors, the
+// workstation at every desk, and what fills the pantry and lounge corners.
+interface Theme {
+  labels?: Partial<Record<MapSpot, string>>;
+  floors?: Partial<Record<MapSpot, [string, string]>>;
+  station?: [Rows, Palette];
+  pantry?: "coffee" | "counter" | "lockers";
+  lounge?: "sofa" | "tables" | "crates" | "pool";
+}
+
+const THEMES: Record<string, Theme> = {
+  office: {},
+  kitchen: {
+    labels: { desk: "ครัว", pantry: "เคาน์เตอร์หน้าร้าน", lounge: "โต๊ะลูกค้า", server: "ห้อง IT" },
+    floors: { desk: ["#c2c3c7", "#b0b1b8"], lounge: ["#8a5a3a", "#7a4f33"] },
+    station: [STOVE, STOVE_PALETTE],
+    pantry: "counter",
+    lounge: "tables",
+  },
+  clinic: {
+    labels: { desk: "ห้องทำฟัน", pantry: "เคาน์เตอร์ต้อนรับ", lounge: "ห้องรอคนไข้", meeting: "ห้องประชุมหมอ", server: "ห้อง IT" },
+    floors: { desk: ["#cfe8e3", "#bfdcd6"], pantry: ["#e8e2d0", "#dcd5c1"], lounge: ["#d9e3ea", "#c9d5de"] },
+    station: [DENTAL_CHAIR, DENTAL_CHAIR_PALETTE],
+    pantry: "counter",
+  },
+  factory: {
+    labels: { desk: "ไลน์ผลิต", pantry: "ห้องพักพนักงาน", lounge: "คลังวัตถุดิบ", ceo: "ห้องผู้บริหาร", server: "ห้อง IT / OT" },
+    floors: { desk: ["#5a5f66", "#50555c"], lounge: ["#6b6250", "#605846"] },
+    station: [MACHINE, MACHINE_PALETTE],
+    lounge: "crates",
+  },
+  hotel: {
+    labels: { desk: "ห้องพักแขก", pantry: "ล็อบบี้ & Front Office", lounge: "สระว่ายน้ำ", server: "ห้อง IT" },
+    floors: { desk: ["#7a5a6a", "#6e505f"], pantry: ["#c9b28a", "#bba47c"], lounge: ["#c2c3c7", "#b0b1b8"] },
+    station: [BED, BED_PALETTE],
+    pantry: "counter",
+    lounge: "pool",
+  },
+  farm: {
+    labels: { desk: "โรงเรือน", pantry: "ห้องควบคุม", lounge: "โกดังผลผลิต", server: "ห้อง IT" },
+    floors: { desk: ["#5d4a2f", "#54422a"], lounge: ["#6b6250", "#605846"] },
+    station: [PLANTER, PLANTER_PALETTE],
+    lounge: "crates",
+  },
+  warehouse: {
+    labels: { desk: "คลังสินค้า / จุดคัดแยก", pantry: "ห้องพักพนักงาน", lounge: "ลานโหลดของ", server: "ห้อง IT" },
+    floors: { desk: ["#5a5f66", "#50555c"], lounge: ["#4a4f56", "#42474e"] },
+    station: [SHELF, SHELF_PALETTE],
+    lounge: "crates",
+  },
+  gym: {
+    labels: { desk: "สตูดิโอ", pantry: "เคาน์เตอร์สมาชิก", lounge: "มุมพักผ่อน", server: "ห้อง IT" },
+    floors: { desk: ["#2f4a5a", "#294250"] },
+    station: [TREADMILL, TREADMILL_PALETTE],
+    pantry: "counter",
+  },
+  condo: {
+    labels: { desk: "สำนักงานนิติบุคคล", pantry: "ห้องพัสดุ", lounge: "ล็อบบี้", server: "ห้อง IT / CCTV" },
+    floors: { lounge: ["#c9b28a", "#bba47c"] },
+    pantry: "lockers",
+  },
+};
+
 const TICK_MS = 2600;
 const WALK_MS = 1800;
 
@@ -108,6 +192,7 @@ function truncate(text: string, max: number): string {
 }
 
 interface OfficeMapProps {
+  theme: string;
   employees: PublicEmployee[];
   presence: Record<string, Presence>;
   messages: ChatMessage[];
@@ -119,6 +204,8 @@ interface OfficeMapProps {
 
 export function OfficeMap(props: OfficeMapProps) {
   const { employees, presence, messages, openRisks, busy } = props;
+  const theme = THEMES[props.theme] ?? THEMES.office;
+  const floor = (spot: MapSpot) => theme.floors?.[spot] ?? FLOORS[spot];
   const reduceMotion = useMemo(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false, []);
   const [tick, setTick] = useState(0);
   const [walking, setWalking] = useState<Set<string>>(new Set());
@@ -206,9 +293,9 @@ export function OfficeMap(props: OfficeMapProps) {
           <defs>
             {ROOMS.map((r) => (
               <pattern key={r.spot} id={`floor-${r.spot}`} width={24} height={24} patternUnits="userSpaceOnUse">
-                <rect width={24} height={24} fill={FLOORS[r.spot][0]} />
-                <rect width={12} height={12} fill={FLOORS[r.spot][1]} />
-                <rect x={12} y={12} width={12} height={12} fill={FLOORS[r.spot][1]} />
+                <rect width={24} height={24} fill={floor(r.spot)[0]} />
+                <rect width={12} height={12} fill={floor(r.spot)[1]} />
+                <rect x={12} y={12} width={12} height={12} fill={floor(r.spot)[1]} />
               </pattern>
             ))}
           </defs>
@@ -220,11 +307,11 @@ export function OfficeMap(props: OfficeMapProps) {
               <rect className="wall" x={r.x} y={r.y} width={r.w} height={15} />
               <rect className="wall-edge" x={r.x} y={r.y + 15} width={r.w} height={3} />
               <rect className="room-border" x={r.x} y={r.y} width={r.w} height={r.h} />
-              <RoomSign x={r.x + 8} y={r.y + 3} label={r.label} />
+              <RoomSign x={r.x + 8} y={r.y + 3} label={theme.labels?.[r.spot] ?? r.label} />
             </g>
           ))}
 
-          <Furniture alarm={alarm} />
+          <Furniture alarm={alarm} theme={theme} />
 
           {shownRisks.map((risk, i) => (
             <AttackPath key={risk.newsId} risk={risk} offset={i * 7} breach={breach} />
@@ -396,7 +483,8 @@ function AttackPath({ risk, offset, breach }: { risk: OpenRisk; offset: number; 
   );
 }
 
-function Furniture({ alarm }: { alarm: boolean }) {
+function Furniture({ alarm, theme }: { alarm: boolean; theme: Theme }) {
+  const [stationRows, stationPalette] = theme.station ?? [DESK, DESK_PALETTE];
   const rackPalette = alarm ? { ...RACK_PALETTE, L: "#ff004d" } : RACK_PALETTE;
   return (
     <g className="furniture" aria-hidden="true">
@@ -423,19 +511,33 @@ function Furniture({ alarm }: { alarm: boolean }) {
 
       {/* Open-plan desks */}
       {DESKS.map(([cx, cy], i) => (
-        <PixelArt key={i} rows={DESK} palette={DESK_PALETTE} x={cx - 30} y={cy - 24} scale={PX} />
+        <PixelArt key={i} rows={stationRows} palette={stationPalette} x={cx - 30} y={cy - 24} scale={PX} />
       ))}
       <PixelArt rows={PLANT} palette={PLANT_PALETTE} x={600} y={500} scale={PX} />
       <rect className="door" x={DOOR[0] - 40} y={534} width={80} height={8} shapeRendering="crispEdges" />
 
-      {/* Pantry */}
-      <PixelArt rows={COUNTER} palette={COUNTER_PALETTE} x={680} y={258} scale={PX} />
-      <PixelArt rows={COFFEE} palette={COFFEE_PALETTE} x={700} y={226} scale={PX} />
+      {/* Pantry corner: coffee by default, a service counter, or parcel lockers */}
+      {theme.pantry === "lockers" ? (
+        [0, 1, 2].map((i) => <PixelArt key={i} rows={SHELF} palette={LOCKER_PALETTE} x={680 + i * 66} y={236} scale={PX} />)
+      ) : (
+        <PixelArt rows={COUNTER} palette={COUNTER_PALETTE} x={680} y={258} scale={PX} />
+      )}
+      {(theme.pantry ?? "coffee") === "coffee" && <PixelArt rows={COFFEE} palette={COFFEE_PALETTE} x={700} y={226} scale={PX} />}
       <PixelArt rows={PLANT} palette={PLANT_PALETTE} x={904} y={322} scale={PX} />
 
-      {/* Lounge */}
-      <PixelArt rows={SOFA} palette={SOFA_PALETTE} x={690} y={418} scale={PX} />
-      <PixelArt rows={TV} palette={TV_PALETTE} x={850} y={410} scale={PX} />
+      {/* Lounge corner: sofa by default, dining tables, crates or a pool */}
+      {(theme.lounge ?? "sofa") === "sofa" && (
+        <>
+          <PixelArt rows={SOFA} palette={SOFA_PALETTE} x={690} y={418} scale={PX} />
+          <PixelArt rows={TV} palette={TV_PALETTE} x={850} y={410} scale={PX} />
+        </>
+      )}
+      {theme.lounge === "tables" && <PixelArt rows={TABLE} palette={TABLE_PALETTE} x={700} y={440} scale={PX} />}
+      {theme.lounge === "crates" &&
+        [0, 1, 2, 3].map((i) => (
+          <PixelArt key={i} rows={CRATE} palette={CRATE_PALETTE} x={690 + (i % 2) * 44 + (i > 1 ? 110 : 0)} y={420 + (i % 2) * 26} scale={PX} />
+        ))}
+      {theme.lounge === "pool" && <PixelArt rows={POOL} palette={POOL_PALETTE} x={690} y={418} scale={PX} />}
       <PixelArt rows={PLANT} palette={PLANT_PALETTE} x={904} y={500} scale={PX} />
 
       {/* Outline around the whole floor */}
