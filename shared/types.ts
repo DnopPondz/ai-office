@@ -205,6 +205,8 @@ export interface GameState {
   tickets: PublicTicket[];
   // Channels (or "ticket:<id>") where someone is composing a reply right now.
   typing: string[];
+  // Who is typing in a channel, when known (the next queued message's author).
+  typingAuthors: Record<string, string>;
   maxStaff: number;
   openRisks: OpenRisk[];
   // Share of today's account-wide AI budget left. At 0 the game keeps going on pooled and scripted scenes.

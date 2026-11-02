@@ -271,10 +271,11 @@ export function App() {
         ) : (
           <div className="messages" ref={listRef}>
             {visible.length === 0 && <p className="empty">ยังไม่มีข้อความในช่องนี้</p>}
-            {visible.map((m) => (
+            {visible.map((m, i) => (
               <Message
                 key={m.id}
                 message={m}
+                continued={isContinuation(visible[i - 1], m)}
                 author={authors[m.author]}
                 ticket={m.link?.startsWith("ticket:") ? tickets.get(m.link.slice(7)) : undefined}
                 ticketFrom={m.link?.startsWith("ticket:") ? authors[tickets.get(m.link.slice(7))?.from ?? ""] : undefined}
@@ -285,7 +286,8 @@ export function App() {
             ))}
             {game.typing.includes(channel) && (
               <p className="typing">
-                {channel.startsWith("dm-") ? authors[channel.slice(3)]?.name ?? "พนักงาน" : "พนักงาน"}กำลังพิมพ์<span className="dots" />
+                {authors[game.typingAuthors[channel] ?? (channel.startsWith("dm-") ? channel.slice(3) : "")]?.name ?? "พนักงาน"}กำลังพิมพ์
+                <span className="dots" />
               </p>
             )}
           </div>
@@ -640,8 +642,15 @@ function Diff({ text }: { text: string }) {
   );
 }
 
+// Chat lines from the same person within two minutes are grouped under one name and avatar.
+function isContinuation(prev: ChatMessage | undefined, m: ChatMessage): boolean {
+  return Boolean(prev && prev.author === m.author && prev.kind === "chat" && m.kind === "chat" && m.ts - prev.ts < 2 * 60 * 1000);
+}
+
+// The CEO's own lines sit on the right, everyone else on the left, like a messaging app.
 function Message(props: {
   message: ChatMessage;
+  continued?: boolean;
   author?: PublicEmployee;
   ticket?: PublicTicket;
   ticketFrom?: PublicEmployee;
@@ -652,17 +661,20 @@ function Message(props: {
   const { message, author } = props;
   const who = author ?? { id: message.author, name: message.author, role: "", emoji: "" };
   const external = message.link && !message.link.startsWith("ticket:") ? message.link : null;
+  const mine = message.author === "ceo";
   return (
-    <article className={`message ${message.kind}`}>
+    <article className={`message ${message.kind}${mine ? " mine" : ""}${props.continued ? " continued" : ""}`}>
       <div className="avatar" aria-hidden="true">
-        <PixelAvatar id={message.author} size={36} />
+        {!props.continued && <PixelAvatar id={message.author} size={36} />}
       </div>
       <div className="body">
-        <div className="meta">
-          <b>{who.name}</b>
-          {who.role && <span className="role">{who.role}</span>}
-          <time>{formatTime(message.ts)}</time>
-        </div>
+        {!props.continued && (
+          <div className="meta">
+            <b>{mine ? "คุณ" : who.name}</b>
+            {!mine && who.role && <span className="role">{who.role}</span>}
+            <time>{formatTime(message.ts)}</time>
+          </div>
+        )}
         {message.kind === "diff" ? <Diff text={message.text} /> : <p className="text">{message.text}</p>}
         {props.ticket && (
           <TicketCard ticket={props.ticket} from={props.ticketFrom} receivedAt={props.receivedAt} busy={props.busy} compact={props.ticket.kind === "email"} onAnswer={props.onAnswer} />

@@ -217,6 +217,10 @@ Rules:
 - Do not mock or accuse real companies or people. Characters can be frustrated with the situation, not insult vendors.
 - Channels: "general", "dev", "random", and "dm-<employeeId>" (a private DM from that employee to the CEO).`;
 
+const CONVERSATION_RULES = `Messages are in the order they are sent and read like a real chat: people answer each other,
+use each other's names, pick up what the previous person just said, agree, push back or joke. Short Slack-style lines;
+someone may send two quick messages in a row. Avoid a list of separate statements that ignore each other.`;
+
 const PRESENCE_RULES = `Also return "presence" for every employee: where they physically are in the office right now.
 "spot" is one of: desk (own desk), meeting (meeting room), server (server room), pantry (coffee corner),
 ceo (in the CEO's office), lounge (sofa corner), away (out of the office).
@@ -224,6 +228,7 @@ ceo (in the CEO's office), lounge (sofa corner), away (out of the office).
 (incident: server room or meeting; gossip: pantry; asking the CEO for something: ceo; secretly job hunting: away).`;
 
 const SCENE_RULES = `Write 6 to 10 messages across at least 3 channels, including at least one DM to the CEO.
+${CONVERSATION_RULES}
 Then write ONE decision for the CEO: a short Thai question and exactly 3 options. The question is the game's narration,
 not an employee speaking: no polite particles (no ครับ, ค่ะ, คะ).
 Each option has a short Thai label, integer effects between -25 and 25 for any of cash, morale, security, reputation, uptime, kpi
@@ -412,6 +417,7 @@ export async function generateAftermath(
     `REJECTED: ${input.others.map((o) => o.label).join(" / ")}`,
     "",
     "Write 3 to 5 short messages reacting to the CEO's decision, true to each personality. Include at least one DM to the CEO. No decision.",
+    CONVERSATION_RULES,
     PRESENCE_RULES,
   ].join("\n");
   const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 900);
@@ -463,7 +469,8 @@ export async function generateChatReply(
     dmWith
       ? `This is a private DM, so only ${dmWith.name} (id=${dmWith.id}) answers, in channel "${input.channel}", 1 or 2 messages.`
       : `Reply in channel "${input.channel}" as 1 to 3 employees who would naturally answer.`,
-    "Answer the CEO's actual question in character and in role: each person knows their own job (security, sales, ops...).",
+    "Answer the CEO's actual question in character and in role: each person knows their own job.",
+    "When more than one person answers, the later ones react to the earlier answers (add to it, disagree, joke), like a real group chat.",
     "Use only facts given above; anything else is an opinion or a guess and must sound like one. If they do not know, they say so.",
     "They may bring up their own waiting tickets or worries. Do not make decisions for the CEO and do not offer options.",
     PRESENCE_RULES,
@@ -533,6 +540,27 @@ export async function generateWelcome(
     messages: sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).slice(0, 6),
     presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
     personas,
+  };
+}
+
+// Employees chatting among themselves between events: one thread in one channel.
+export async function generateConversation(env: Env, input: ChatContext): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
+  const prompt = [
+    ...contextLines(input),
+    "",
+    'Write one conversation of 4 to 6 messages between 2 or 3 employees in a single channel ("random" for life and gossip, "dev" or "general" for work).',
+    "Continue a thread from RECENT CHAT if there is one worth continuing; otherwise start a new topic: their work, a BUSINESS CONCERN, a waiting ticket, office life or something personal that fits their personality and secret goal (as a hint).",
+    CONVERSATION_RULES,
+    "They are talking to each other, not to the CEO. No decisions.",
+    PRESENCE_RULES,
+  ].join("\n");
+  const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 700);
+  const messages = sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).filter((m) => !m.channel.startsWith("dm-"));
+  // Keep the thread in one channel even if the model drifted.
+  const channel = messages[0]?.channel ?? "random";
+  return {
+    messages: messages.map((m) => ({ ...m, channel })).slice(0, 6),
+    presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
   };
 }
 

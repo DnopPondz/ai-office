@@ -5,7 +5,7 @@ import { generateStaff, roleCast } from "../worker/roster";
 import { ROLES, roleCovers } from "../worker/roles";
 import { kpiTarget, hireRoles } from "../worker/business";
 import { breachScript, regressionScript, fallbackReactions } from "../worker/scripted";
-import { chatterLine } from "../worker/chatter";
+import { chatterConversation, chatterLine } from "../worker/chatter";
 import { pickQuietScript, toScene, welcomeLines, welcomeNotice } from "../worker/scripted";
 import { applyEffects, formatEffects, generateScene, matchStack } from "../worker/game";
 import { getPooledScene } from "../worker/pool";
@@ -100,6 +100,10 @@ for (const b of BUSINESSES) {
   for (let i = 0; i < 30; i++) {
     const line = chatterLine(staff, () => "🙂");
     check(line && !leftover.test(line.post.text), `${b.id}: chatter`);
+    const convo = chatterConversation(staff, () => "🙂");
+    check(convo && new Set(convo.posts.map((p) => p.author)).size >= 2, `${b.id}: conversation needs two people`);
+    check(convo && convo.posts.every((p) => !leftover.test(p.text) && !/\{[xyz]\}/.test(p.text)), `${b.id}: conversation tokens`);
+    check(convo && new Set(convo.posts.map((p) => p.channel)).size === 1, `${b.id}: conversation in one channel`);
   }
   check(fallbackReactions({ id: "a", label: "x", effects: { kpi: -5 }, patches: false }, staff).length >= 1, `${b.id}: kpi fallback`);
   for (const other of BUSINESSES) if (other.id !== b.id) check(![...seen].some((id) => id.startsWith(other.id + "-")), `${b.id}: drew ${other.id} scene`);

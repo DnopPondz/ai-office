@@ -16,7 +16,7 @@ import {
   roleTitle,
   type Business,
 } from "./business";
-import { chatterLine, reminderLine, sadLine } from "./chatter";
+import { chatterConversation, chatterLine, reminderLine, sadLine } from "./chatter";
 import {
   REGRESSION_CHANCE,
   REGRESSION_EFFECTS,
@@ -27,6 +27,7 @@ import {
   formatEffects,
   generateAftermath,
   generateChatReply,
+  generateConversation,
   generateScene,
   generateWelcome,
   interpretReply,
@@ -67,6 +68,15 @@ import { newTicket, openTickets, publicTicket, pruneTickets, sceneToTicket, wors
 const EVENT_EVERY_MS = 2 * 60 * 1000;
 const FIRST_EVENT_MS = 30 * 1000;
 const CHATTER_EVERY_MS = 60 * 1000;
+// How often (online, with AI budget) the model writes a conversation between employees.
+const TALK_EVERY_MS = 4 * 60 * 1000;
+// Share of small-talk moments that are a short scripted exchange rather than a single line.
+const CONVO_CHANCE = 0.6;
+// Queued messages are released one by one, paced like typing (real milliseconds).
+const TYPE_MS_BASE = 1500;
+const TYPE_MS_PER_CHAR = 35;
+const TYPE_MS_MAX = 6000;
+const OUTBOX_LIMIT = 40;
 // One game day per event on average, so a month (payday) still spans about five decisions,
 // the balance the economy was tuned for.
 const DAY_MS = EVENT_EVERY_MS;
@@ -95,6 +105,7 @@ const MAX_TEXT = 500;
 // AI work runs one job at a time from the alarm, never inside a player's request.
 type Job =
   | { type: "welcome" }
+  | { type: "talk" }
   | { type: "event" }
   | { type: "reply"; channel: string; text: string }
   | { type: "aftermath"; ticketId: string; optionId: string }
@@ -126,6 +137,9 @@ interface StoredState {
   jobs: Job[];
   running: Job | null;
   runningSince: number;
+  nextTalkAt: number;
+  // Chat lines waiting to appear, so a conversation unfolds instead of landing all at once.
+  outbox: { at: number; post: DraftMessage }[];
 }
 
 // A news or dependency event that is only committed once a scene for it is available.
@@ -199,7 +213,7 @@ export class Company extends DurableObject<Env> {
   }
 
   async answer(ticketId: string, choice: { optionId?: string; text?: string }, since = 0): Promise<GameState> {
-    const s = await this.mutate((s, posts) => {
+    const s = await this.mutate((s, posts, later) => {
       if (s.gameOver) throw new Error("เกมจบแล้ว กดเริ่มบริษัทใหม่ได้เลย");
       const t = s.tickets.find((x) => x.id === ticketId);
       if (!t || t.status !== "open") throw new Error("เรื่องนี้ปิดไปแล้ว");
@@ -207,7 +221,7 @@ export class Company extends DurableObject<Env> {
       if (choice.optionId) {
         const option = t.options.find((o) => o.id === choice.optionId);
         if (!option) throw new Error("ไม่พบตัวเลือกนี้");
-        const needsAftermath = this.resolve(s, t, { optionId: option.id, label: option.label, effects: option.effects, patches: option.patches }, posts);
+        const needsAftermath = this.resolve(s, t, { optionId: option.id, label: option.label, effects: option.effects, patches: option.patches }, posts, later);
         if (needsAftermath) s.jobs.push({ type: "aftermath", ticketId: t.id, optionId: option.id });
         return;
       }
@@ -295,6 +309,7 @@ export class Company extends DurableObject<Env> {
 
   private async runJob(job: Job): Promise<void> {
     if (job.type === "welcome") return this.runWelcome();
+    if (job.type === "talk") return this.runTalk();
     if (job.type === "event") return this.runEvent();
     if (job.type === "reply") return this.runReply(job.channel, job.text);
     if (job.type === "aftermath") return this.runAftermath(job.ticketId, job.optionId);
@@ -303,17 +318,43 @@ export class Company extends DurableObject<Env> {
 
   // Loads state, advances the clock, applies fn, saves, and re-arms the alarm. Only storage is
   // awaited in between, so nothing else can interleave with the change.
-  private async mutate(fn: (s: StoredState, posts: DraftMessage[]) => void): Promise<StoredState> {
+  // "posts" appear at once; "later" posts are queued and released one by one like typing.
+  private async mutate(fn: (s: StoredState, posts: DraftMessage[], later: DraftMessage[]) => void): Promise<StoredState> {
     const s = await this.load();
     const usedNames = (await this.ctx.storage.get<string[]>("usedNames")) ?? [];
+    const now = Date.now();
     const posts: DraftMessage[] = [];
-    this.tick(s, Date.now(), usedNames, posts);
-    fn(s, posts);
+    const later: DraftMessage[] = [];
+    const queued = this.release(s, now);
+    this.tick(s, now, usedNames, posts, later);
+    fn(s, posts, later);
+    this.enqueue(s, later, now);
     s.tickets = pruneTickets(s.tickets);
-    this.insert(posts.filter((p) => this.isKnownAuthor(s, p.author)));
+    this.insert([...queued, ...posts, ...this.release(s, now)].filter((p) => this.isKnownAuthor(s, p.author)));
     await this.save(s);
     await this.schedule(s);
     return s;
+  }
+
+  private enqueue(s: StoredState, later: DraftMessage[], now: number): void {
+    // A batch waits only for lines still queued in the same channels, so a reply in a DM does
+    // not sit behind small talk in #random; threads in different channels unfold side by side.
+    const channels = new Set(later.map((p) => p.channel));
+    let cursor = Math.max(now, ...s.outbox.filter((o) => channels.has(o.post.channel)).map((o) => o.at));
+    later.forEach((post, i) => {
+      if (i > 0 && (post.kind ?? "chat") === "chat") cursor += Math.min(TYPE_MS_MAX, TYPE_MS_BASE + post.text.length * TYPE_MS_PER_CHAR);
+      s.outbox.push({ at: cursor, post });
+    });
+    // Kept in delivery order (schedule() and the typing hint read the front). A backlog never
+    // grows without bound; the earliest lines are the ones that would go out first anyway.
+    s.outbox.sort((a, b) => a.at - b.at);
+    if (s.outbox.length > OUTBOX_LIMIT) s.outbox = s.outbox.slice(0, OUTBOX_LIMIT);
+  }
+
+  private release(s: StoredState, now: number): DraftMessage[] {
+    const due = s.outbox.filter((o) => o.at <= now).map((o) => o.post);
+    s.outbox = s.outbox.filter((o) => o.at > now);
+    return due;
   }
 
   private async schedule(s: StoredState): Promise<void> {
@@ -330,11 +371,12 @@ export class Company extends DurableObject<Env> {
     const dues = [s.nextEventAt, (s.day + 1) * DAY_MS];
     for (const t of openTickets(s.tickets)) dues.push(t.status === "open" ? t.deadline : Infinity);
     const nextDue = Math.min(...dues);
-    const wait = Math.max(5000, (nextDue - s.clock) / OFFLINE_RATE);
+    let wait = Math.max(5000, (nextDue - s.clock) / OFFLINE_RATE);
+    if (s.outbox.length) wait = Math.min(wait, Math.max(1000, s.outbox[0].at - Date.now()));
     await this.ctx.storage.setAlarm(Date.now() + (s.running ? STALE_JOB_MS : wait));
   }
 
-  private tick(s: StoredState, now: number, usedNames: string[], posts: DraftMessage[]): void {
+  private tick(s: StoredState, now: number, usedNames: string[], posts: DraftMessage[], later: DraftMessage[]): void {
     const online = now - s.lastSeen < ONLINE_WINDOW_MS;
     const elapsed = Math.max(0, now - s.lastReal);
     s.lastReal = now;
@@ -366,11 +408,24 @@ export class Company extends DurableObject<Env> {
     if (s.clock >= s.nextChatterAt) {
       s.nextChatterAt = s.clock + jitter(CHATTER_EVERY_MS);
       // Small talk is for the player; nobody chats into an empty room.
-      const chat = online ? chatterLine(s.staff, (e) => s.presence[e.id]?.mood ?? "🙂") : null;
-      if (chat) {
-        posts.push(chat.post);
-        s.presence = mergePresence(s.presence, chat.presence);
+      const mood = (e: Employee) => s.presence[e.id]?.mood ?? "🙂";
+      const convo = online && Math.random() < CONVO_CHANCE ? chatterConversation(s.staff, mood) : null;
+      if (convo) {
+        later.push(...convo.posts);
+        s.presence = mergePresence(s.presence, convo.presence);
+      } else {
+        const chat = online ? chatterLine(s.staff, mood) : null;
+        if (chat) {
+          later.push(chat.post);
+          s.presence = mergePresence(s.presence, chat.presence);
+        }
       }
+    }
+
+    const talkQueued = s.jobs.some((j) => j.type === "talk") || s.running?.type === "talk";
+    if (s.clock >= s.nextTalkAt) {
+      s.nextTalkAt = s.clock + jitter(TALK_EVERY_MS);
+      if (online && !talkQueued && !s.outbox.length) s.jobs.push({ type: "talk" });
     }
 
     const eventQueued = s.jobs.some((j) => j.type === "event") || s.running?.type === "event";
@@ -390,6 +445,7 @@ export class Company extends DurableObject<Env> {
     t: Ticket,
     choice: { optionId: string | null; label: string; effects: Partial<Stats>; patches: boolean },
     posts: DraftMessage[],
+    later: DraftMessage[] = posts,
   ): boolean {
     const b = getBusiness(s.businessId);
     const unit = cashUnit(b);
@@ -413,7 +469,7 @@ export class Company extends DurableObject<Env> {
     posts.push({ channel, author: "ceo", text: `📢 ${t.subject}\nตัดสินใจ: ${choice.label}` });
     posts.push({ channel, author: "system", kind: "system", text: `ผลกระทบ: ${effects || "ไม่มี"}${note}` });
     const scripted = choice.optionId ? t.reactions?.[choice.optionId] : undefined;
-    if (scripted) posts.push(...scripted);
+    if (scripted) later.push(...scripted);
     s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
     return !scripted && !action && choice.optionId !== null;
   }
@@ -548,7 +604,7 @@ export class Company extends DurableObject<Env> {
       }
     }
 
-    await this.mutate((s, posts) => {
+    await this.mutate((s, posts, later) => {
       if (s.gameOver) return;
       const unit = cashUnit(b);
       let riskId: string | null = null;
@@ -587,11 +643,11 @@ export class Company extends DurableObject<Env> {
         reactions = built.reactions;
       }
       if (!finalScene) return;
-      posts.push(...finalScene.messages);
+      later.push(...finalScene.messages);
       s.presence = mergePresence(eventPresence(event, s.presence, s.staff), finalScene.presence);
       const { ticket, notice } = sceneToTicket(finalScene, event, s.staff, s.clock, { newsId: riskId, reactions });
       s.tickets.push(ticket);
-      posts.push(notice);
+      later.push(notice);
       s.gameOver = checkGameOver(s.stats, getBusiness(s.businessId).kpi.ending);
     });
   }
@@ -610,10 +666,30 @@ export class Company extends DurableObject<Env> {
     } catch (err) {
       if (!(err instanceof AiBudgetError)) console.error("welcome failed", err);
     }
-    await this.mutate((s, posts) => {
+    await this.mutate((s, _posts, later) => {
       // Model-written personalities replace the drafts picked from the role's pool.
       for (const e of s.staff) if (personas[e.id]) Object.assign(e, personas[e.id]);
-      posts.push(...(messages.length >= 2 ? messages : welcomeLines(s.staff)));
+      later.push(...(messages.length >= 2 ? messages : welcomeLines(s.staff)));
+      s.presence = mergePresence(s.presence, presence);
+    });
+  }
+
+  // Employees talking among themselves, written by the model; skipped when the budget is spent.
+  private async runTalk(): Promise<void> {
+    const s0 = await this.load();
+    if (s0.gameOver || !(await hasAiBudget(this.env))) return;
+    let messages: DraftMessage[] = [];
+    let presence: Partial<PresenceMap> = {};
+    try {
+      const r = await generateConversation(this.env, this.chatContext(s0));
+      messages = r.messages;
+      presence = r.presence;
+    } catch (err) {
+      if (!(err instanceof AiBudgetError)) console.error("talk failed", err);
+    }
+    if (messages.length < 2) return;
+    await this.mutate((s, _posts, later) => {
+      later.push(...messages);
       s.presence = mergePresence(s.presence, presence);
     });
   }
@@ -629,14 +705,14 @@ export class Company extends DurableObject<Env> {
     } catch (err) {
       if (!(err instanceof AiBudgetError)) console.error("chat reply failed", err);
     }
-    await this.mutate((s, posts) => {
+    await this.mutate((s, _posts, later) => {
       if (!messages.length) {
         // No model (or a bad answer): a short holding reply so the CEO is not left hanging.
         const who = channel.startsWith("dm-") ? s.staff.find((e) => `dm-${e.id}` === channel) : s.staff[Math.floor(Math.random() * s.staff.length)];
-        if (who) posts.push(this.say(s, who, channel, "รับทราบ{end} ตอนนี้ติดงานอยู่ เดี๋ยวกลับมาตอบนะ{ask}"));
+        if (who) later.push(this.say(s, who, channel, "รับทราบ{end} ตอนนี้ติดงานอยู่ เดี๋ยวกลับมาตอบนะ{ask}"));
         return;
       }
-      posts.push(...messages);
+      later.push(...messages);
       s.presence = mergePresence(s.presence, presence);
     });
   }
@@ -663,8 +739,8 @@ export class Company extends DurableObject<Env> {
       // Reactions are flavour; the decision itself already counted.
       if (!(err instanceof AiBudgetError)) console.error("aftermath failed", err);
     }
-    await this.mutate((s, posts) => {
-      posts.push(...(messages.length ? messages : fallbackReactions(chosen, s.staff)));
+    await this.mutate((s, _posts, later) => {
+      later.push(...(messages.length ? messages : fallbackReactions(chosen, s.staff)));
       s.presence = mergePresence(s.presence, presence);
     });
   }
@@ -688,7 +764,7 @@ export class Company extends DurableObject<Env> {
     } catch (err) {
       if (!(err instanceof AiBudgetError)) console.error("interpret failed", err);
     }
-    await this.mutate((s, posts) => {
+    await this.mutate((s, posts, later) => {
       const live = s.tickets.find((x) => x.id === ticketId);
       if (!live || live.status !== "thinking") return;
       if (!result) {
@@ -698,11 +774,11 @@ export class Company extends DurableObject<Env> {
       }
       const option = result.optionId ? live.options.find((o) => o.id === result!.optionId) : undefined;
       const label = option ? option.label : `ตอบเอง: ${truncate(text, 80)}`;
-      this.resolve(s, live, { optionId: option?.id ?? null, label, effects: result.effects, patches: result.patches }, posts);
+      this.resolve(s, live, { optionId: option?.id ?? null, label, effects: result.effects, patches: result.patches }, posts, later);
       const from = s.staff.find((e) => e.id === live.from);
       // Scripted reactions (HR tickets) already spoke; otherwise the requester answers.
       if (result.reply && from && !(option && live.reactions?.[option.id])) {
-        posts.push({ channel: ticketChannel(live), author: from.id, text: result.reply, kind: "chat" });
+        later.push({ channel: ticketChannel(live), author: from.id, text: result.reply, kind: "chat" });
       }
     });
   }
@@ -829,6 +905,8 @@ export class Company extends DurableObject<Env> {
       jobs: [{ type: "welcome" }],
       running: null,
       runningSince: 0,
+      nextTalkAt: 2 * 60 * 1000,
+      outbox: [],
     };
     this.insert([welcomeNotice({ name: fresh.companyName, business: b.label })]);
     await this.save(fresh);
@@ -884,7 +962,7 @@ export class Company extends DurableObject<Env> {
     const messages: ChatMessage[] = rows.map((m) => ({ ...m, kind: m.kind as MessageKind }));
     const b = getBusiness(s.businessId);
     const typingOf = (j: Job | null): string | null =>
-      !j ? null : j.type === "reply" ? j.channel : j.type === "welcome" ? "general" : j.type === "event" ? null : `ticket:${j.ticketId}`;
+      !j ? null : j.type === "reply" ? j.channel : j.type === "welcome" ? "general" : j.type === "event" || j.type === "talk" ? null : `ticket:${j.ticketId}`;
     const open = openTickets(s.tickets).sort((x, y) => x.deadline - y.deadline);
     const closed = s.tickets.filter((t) => !open.includes(t));
     return {
@@ -911,7 +989,15 @@ export class Company extends DurableObject<Env> {
       deps: Object.entries(s.deps).map(([name, version]) => ({ name, version })),
       messages,
       tickets: [...open, ...closed].map((t) => publicTicket(t, s.clock)),
-      typing: [...s.jobs, s.running].map(typingOf).filter((c): c is string => Boolean(c)),
+      typing: [
+        ...new Set([
+          ...[...s.jobs, s.running].map(typingOf).filter((c): c is string => Boolean(c)),
+          ...s.outbox.filter((o) => (o.post.kind ?? "chat") === "chat").map((o) => o.post.channel),
+        ]),
+      ],
+      typingAuthors: Object.fromEntries(
+        [...s.outbox].reverse().filter((o) => (o.post.kind ?? "chat") === "chat").map((o) => [o.post.channel, o.post.author]),
+      ),
       maxStaff: MAX_STAFF,
       openRisks: s.openRisks,
       aiPercentLeft: await aiBudgetPercentLeft(this.env),
@@ -984,6 +1070,8 @@ function migrate(existing: StoredState & { decision?: LegacyDecision | null; scr
     jobs: existing.jobs ?? [],
     running: existing.running ?? null,
     runningSince: existing.runningSince ?? 0,
+    nextTalkAt: existing.nextTalkAt ?? clock + 2 * 60 * 1000,
+    outbox: existing.outbox ?? [],
   };
 }
 

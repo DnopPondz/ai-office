@@ -308,6 +308,55 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* Chat bubbles: employees on the left, the CEO on the right */
+.message.chat .text {
+  display: inline-block;
+  max-width: min(620px, 100%);
+  background: #2b2f36;
+  padding: 7px 12px;
+  border-radius: 4px 14px 14px 14px;
+}
+
+.message.chat:hover {
+  background: transparent;
+}
+
+.message.mine {
+  flex-direction: row-reverse;
+}
+
+.message.mine .body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.message.mine .meta {
+  flex-direction: row-reverse;
+}
+
+.message.mine .text {
+  background: var(--active);
+  color: #fff;
+  border-radius: 14px 4px 14px 14px;
+  text-align: left;
+}
+
+.message.continued {
+  padding-top: 0;
+  margin-top: -2px;
+}
+
+.message.continued .avatar {
+  height: 0;
+  background: transparent;
+}
+
+.message.continued .text {
+  border-radius: 14px;
+}
+
 /* Composer */
 .composer {
   border-top: 1px solid var(--border);

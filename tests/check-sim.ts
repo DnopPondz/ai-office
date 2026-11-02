@@ -159,6 +159,16 @@ async function runAlarms(c: { company: Company; alarm: () => number | null }, ma
   }
 }
 
+// Queued lines are released like typing; step the clock (online) until they are all out.
+async function settle(c: { company: Company; alarm: () => number | null }, ms = 20000) {
+  for (let t = 0; t < ms; t += 1000) {
+    NOW += 1000;
+    await c.company.getState(0);
+    await runAlarms(c);
+  }
+  return c.company.getState(0);
+}
+
 async function onlineFor(c: { company: Company; alarm: () => number | null }, ms: number, step = 3000, autoAnswer = false) {
   let since = 0;
   let last: any;
@@ -188,7 +198,12 @@ check(st.messages.length === 1 && st.messages[0].text.includes(st.company.busine
 check(st.typing.includes("general"), "team typing their greetings");
 await runAlarms(c);
 st = await c.company.getState(0);
+const greetedNow = st.messages.filter((m: any) => m.text.startsWith("ทักทายแบบที่")).length;
+check(greetedNow >= 1 && greetedNow < 4, `greetings unfold one by one (${greetedNow} at first)`);
+check(Object.keys(st.typingAuthors).length > 0, "shows who is typing next");
+st = await settle(c);
 check(aiCalls.includes("welcome") && st.messages.filter((m: any) => m.text.startsWith("ทักทายแบบที่")).length === 4, "AI greetings posted");
+check(Object.keys(st.typingAuthors).length === 0 || st.typing.length > 0, "typing clears when the queue is empty");
 check(st.messages.some((m: any) => m.channel.startsWith("dm-")), "a greeting arrives by DM");
 check(st.tickets.length === 0, "no tickets at start");
 check(st.employees.every((e: any) => typeof e.morale === "number" && e.level >= 1), "morale and level exposed");
@@ -311,7 +326,7 @@ aiMode = "fail";
 const before10 = (await c.company.getState(0)).tickets.length;
 st = await c.company.chat("general", "มีใครอยู่ไหม", 0);
 await runAlarms(c);
-st = await c.company.getState(0);
+st = await settle(c, 8000);
 check(st.messages.some((m: any) => m.text.includes("ตอนนี้ติดงานอยู่")), "holding reply when AI fails");
 aiMode = "ok";
 
@@ -332,8 +347,9 @@ aiMode = "fail";
 const fb = make();
 await fb.company.getState(0);
 await runAlarms(fb);
-const fbState = await fb.company.getState(0);
-check(fbState.messages.length >= 4 && fbState.messages.length <= 5, `fallback greetings (${fbState.messages.length - 1})`);
+const fbState = await settle(fb);
+const fbGreetings = fbState.messages.filter((m: any) => m.kind === "chat" && m.author !== "ceo").length;
+check(fbGreetings >= 3, `fallback greetings (${fbGreetings})`);
 aiMode = "ok";
 
 // 13. legacy migration (pre-clock state with a pending decision)

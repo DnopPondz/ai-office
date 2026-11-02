@@ -74,6 +74,125 @@ export function chatterLine(staff: Employee[], mood: (e: Employee) => string): {
   return null;
 }
 
+// Short back-and-forth exchanges. "x", "y" and "z" are any distinct employees (named with {x},
+// {y}, {z}); other roles are job functions or role ids, cast onto different people.
+interface Convo {
+  channel: "general" | "dev" | "random";
+  spot: OfficeSpot;
+  activity: string;
+  lines: { role: string; text: string }[];
+}
+
+const CONVOS: Convo[] = [
+  { channel: "random", spot: "pantry", activity: "คุยเรื่องข้าวเที่ยง", lines: [
+    { role: "x", text: "เที่ยงนี้กินอะไรกันดี{ask} 🍜" },
+    { role: "y", text: "ร้านส้มตำหน้าซอยไหม{ask} เมื่อวาน{I}เห็นคิวสั้นมาก" },
+    { role: "x", text: "เอาเลย{end} เที่ยงตรงเจอกันข้างล่างนะ" },
+  ] },
+  { channel: "random", spot: "pantry", activity: "เล่าเรื่องวันหยุด", lines: [
+    { role: "x", text: "{y} เสาร์อาทิตย์ไปไหนมา{ask}" },
+    { role: "y", text: "นอนอยู่บ้านทั้งวันเลย{end} 😴 แล้ว{x}ล่ะ" },
+    { role: "x", text: "ไปทะเลมา ยังเพลียไม่หายเลย 🏖️" },
+    { role: "y", text: "อิจฉา! ไว้ทริปหน้าชวนด้วยนะ{ask}" },
+  ] },
+  { channel: "random", spot: "desk", activity: "บ่นรถติด", lines: [
+    { role: "x", text: "รถติดมากเช้านี้ {I}มาสาย 20 นาที 😩" },
+    { role: "y", text: "ฝนตกทีไรติดทุกที ลองนั่งรถไฟฟ้าดูไหม{ask}" },
+    { role: "x", text: "ก็คิดอยู่{end} แต่สถานีไกลบ้านมาก" },
+  ] },
+  { channel: "random", spot: "pantry", activity: "ตามหากาแฟ", lines: [
+    { role: "x", text: "ใครหยิบกาแฟ{I}ไป 😤 แก้วที่เขียนชื่อไว้" },
+    { role: "y", text: "ขอโทษ{end}!! นึกว่าของ{I} เดี๋ยวซื้อคืนให้นะ{ask} 😅" },
+    { role: "x", text: "เอาลาเต้หวานน้อยนะ 😏" },
+  ] },
+  { channel: "random", spot: "lounge", activity: "คุยเรื่องบอล", lines: [
+    { role: "x", text: "เมื่อคืนดูบอลไหม{ask} ⚽" },
+    { role: "y", text: "ดู{end} เสียดายมาก เกือบเสมอแล้วแท้ๆ" },
+    { role: "z", text: "ไม่ต้องพูดถึงเลย {I}เสียพนันข้าวมันไก่ไปสามจาน 😭" },
+  ] },
+  { channel: "random", spot: "pantry", activity: "นัดออกกำลังกาย", lines: [
+    { role: "x", text: "ช่วงนี้งานเยอะจนไม่ได้ออกกำลังกายเลย" },
+    { role: "y", text: "ไปวิ่งสวนกันหลังเลิกงานไหม{ask}" },
+    { role: "x", text: "ได้{end} แต่วิ่งช้าๆ นะ 😅" },
+  ] },
+  { channel: "random", spot: "pantry", activity: "เม้าท์เรื่อง CEO", lines: [
+    { role: "x", text: "ได้ยินว่า CEO ชอบกาแฟดำ จริงไหม{ask} ☕" },
+    { role: "y", text: "ไม่รู้สิ แต่เมื่อเช้า{I}เห็นถือชาเย็นนะ" },
+    { role: "x", text: "ข่าววงในไม่แม่นเลย 😂" },
+  ] },
+  { channel: "random", spot: "desk", activity: "หาเสื้อกันหนาว", lines: [
+    { role: "x", text: "แอร์ตรงโต๊ะ{I}หนาวมาก ใครมีเสื้อคลุมเหลือไหม{ask} 🥶" },
+    { role: "y", text: "{I}มีผ้าห่มอยู่ในลิ้นชัก เอาไปใช้ก่อนได้{end}" },
+    { role: "x", text: "ขอบคุณมาก{end} 🙏" },
+  ] },
+  { channel: "general", spot: "pantry", activity: "วางแผนวันเกิด", lines: [
+    { role: "x", text: "วันศุกร์นี้วันเกิดใครนะ{ask} 🎂" },
+    { role: "y", text: "ของ{z}ไม่ใช่เหรอ" },
+    { role: "z", text: "โดนจับได้ซะแล้ว 😅 เดี๋ยว{I}สั่งเค้กมาให้ทุกคน" },
+  ] },
+  { channel: "general", spot: "desk", activity: "ช่วยกันตรวจงาน", lines: [
+    { role: "x", text: "{y} ช่วยดูเอกสารให้หน่อยได้ไหม{ask} ไม่แน่ใจว่าตัวเลขถูก" },
+    { role: "y", text: "ได้{end} ส่งมาเลย เดี๋ยวดูให้ก่อนเที่ยง" },
+    { role: "x", text: "ขอบคุณ{end} 🙏" },
+  ] },
+  { channel: "general", spot: "desk", activity: "เตือนเรื่องอีเมลหลอก", lines: [
+    { role: "sec", text: "วันนี้มีอีเมลหลอกให้รีเซ็ตรหัสผ่านเข้ามาอีกแล้ว{end} อย่ากดนะ{ask}" },
+    { role: "pm", text: "{I}ก็ได้ หน้าตาเหมือนของจริงมากเลย" },
+    { role: "sec", text: "นั่นแหละ{end} ถ้าไม่แน่ใจส่งมาให้{I}ดูก่อนนะ{ask} 🛡️" },
+  ] },
+  { channel: "general", spot: "meeting", activity: "ลุ้นยอดขาย", lines: [
+    { role: "sales", text: "เดือนนี้ยอดใกล้เป้าแล้วนะ{ask} 📈" },
+    { role: "pm", text: "เก่งมาก{end} อีกนิดเดียว" },
+    { role: "sales", text: "ถ้าถึงเป้า ขอเลี้ยงหมูกระทะทั้งทีมนะ{ask} 😆" },
+    { role: "pm", text: "ถ้าถึงจริง {I}ออกให้ครึ่งหนึ่งเลย" },
+  ] },
+  { channel: "general", spot: "desk", activity: "ส่งงานชิ้นแรก", lines: [
+    { role: "intern", text: "พี่{pm} {I}ทำรายงานเสร็จแล้ว ส่งทางไหนดี{ask}" },
+    { role: "pm", text: "ส่งในแชทนี้ได้เลย{end} เดี๋ยวดูให้" },
+    { role: "intern", text: "ส่งแล้ว{end}! ตื่นเต้นมาก 🐣" },
+  ] },
+];
+
+// A short exchange between employees, or null when the team cannot cast one.
+export function chatterConversation(
+  staff: Employee[],
+  mood: (e: Employee) => string,
+): { posts: DraftMessage[]; presence: Partial<PresenceMap> } | null {
+  for (let tries = 0; tries < 5; tries++) {
+    const convo = CONVOS[Math.floor(Math.random() * CONVOS.length)];
+    const cast: Record<string, Employee> = {};
+    const used = new Set<string>();
+    const roles = [...new Set(convo.lines.map((l) => l.role))];
+    // Named parts first, then "x", "y", "z" from whoever is left.
+    for (const role of roles.filter((r) => !["x", "y", "z"].includes(r))) {
+      const person = staff.find((e) => !used.has(e.id) && (e.roleKey === role || roleCovers(e.roleKey, role)));
+      if (person) {
+        cast[role] = person;
+        used.add(person.id);
+      }
+    }
+    const rest = staff.filter((e) => !used.has(e.id)).sort(() => Math.random() - 0.5);
+    for (const role of roles.filter((r) => ["x", "y", "z"].includes(r))) {
+      const person = rest.shift();
+      if (person) cast[role] = person;
+    }
+    if (roles.some((r) => !cast[r])) continue;
+    const names = (text: string) => text.replace(/\{([xyz])\}/g, (_, k: string) => cast[k].name);
+    const posts: DraftMessage[] = [];
+    for (const line of convo.lines) {
+      const speaker = cast[line.role];
+      const text = renderText(names(line.text), staff, speaker);
+      if (text === null) break;
+      posts.push({ channel: convo.channel, author: speaker.id, text, kind: "chat" });
+    }
+    if (posts.length < convo.lines.length) continue;
+    const presence: Partial<PresenceMap> = {};
+    for (const person of Object.values(cast)) presence[person.id] = { spot: convo.spot, activity: convo.activity, mood: mood(person) };
+    return { posts, presence };
+  }
+  return null;
+}
+
 // A nudge from whoever is waiting on a ticket, sent once at half time.
 export function reminderLine(staff: Employee[], fromId: string, subject: string, channel: string): DraftMessage | null {
   const person = staff.find((e) => e.id === fromId);
