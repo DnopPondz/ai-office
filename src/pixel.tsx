@@ -1,3 +1,5 @@
+import type { AvatarSpec } from "../shared/types";
+
 // Hand-made 8-bit pixel art: sprites are strings of palette keys, rendered as crisp SVG paths.
 // "." is transparent; every other character looks up a colour in the sprite's palette.
 
@@ -108,16 +110,25 @@ interface CharacterSpec {
 
 const SHARED: Palette = { O: OUTLINE, E: OUTLINE, B: "#3b2a20", G: "#9fd3ff" };
 
+// Employees are generated per company and arrive with their own recipe (registerCharacters).
 const CHARACTERS: Record<string, CharacterSpec> = {
-  kan: { looks: ["short", "glasses"], palette: { H: "#3b2a20", S: "#f2c49b", C: "#3e6ec4", P: "#29366f" } },
-  mai: { looks: ["long"], palette: { H: "#a8452f", S: "#f6d2b0", C: "#c4385f", P: "#2b2b3a" } },
-  oat: { looks: ["slick", "tie"], palette: { H: "#1f1612", S: "#d9a066", C: "#e4e4ec", A: "#b13e53", P: "#333c57" } },
-  fah: { looks: ["short", "headset"], palette: { H: "#5d3a1a", S: "#c68642", C: "#38b764", A: "#566c86", P: "#29366f" } },
-  ton: { looks: ["spiky"], palette: { H: "#ffcd75", S: "#f2c49b", C: "#ef7d57", P: "#3b5dc9" } },
-  prae: { looks: ["bun"], palette: { H: "#2b2235", S: "#f6d2b0", C: "#8b5cf6", P: "#2b2b3a" } },
   ceo: { looks: ["slick", "tie"], palette: { H: "#333c57", S: "#f2c49b", C: "#262b44", A: "#ffcd75", P: "#1f2335" } },
   hacker: { looks: ["hood"], palette: { C: "#29203a", s: "#11101a", E: "#ff004d", S: "#11101a", P: "#1a1c2c", B: "#11101a" } },
 };
+
+// Called with each new game state; only changed recipes are replaced.
+export function registerCharacters(people: { id: string; avatar?: AvatarSpec }[]): void {
+  for (const person of people) {
+    if (!person.avatar) continue;
+    const spec: CharacterSpec = {
+      looks: person.avatar.looks.filter((l): l is Look => l in LOOKS),
+      palette: person.avatar.palette,
+    };
+    if (JSON.stringify(CHARACTERS[person.id]) === JSON.stringify(spec)) continue;
+    CHARACTERS[person.id] = spec;
+    frameCache.delete(person.id);
+  }
+}
 
 export interface CharacterFrames {
   idle: Rows;

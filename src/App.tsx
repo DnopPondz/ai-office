@@ -3,7 +3,7 @@ import type { ChatMessage, GameState, PublicEmployee } from "../shared/types";
 import { STAT_KEYS, STAT_LABELS } from "../shared/types";
 import { api, ApiError } from "./api";
 import { OfficeMap } from "./OfficeMap";
-import { PixelAvatar } from "./pixel";
+import { PixelAvatar, registerCharacters } from "./pixel";
 
 const OFFICE = "office";
 const CHANNELS = ["general", "dev", "security-alerts", "random"];
@@ -106,6 +106,7 @@ export function App() {
     return <div className="loading">{error ?? "กำลังเปิดออฟฟิศ..."}</div>;
   }
 
+  registerCharacters(game.employees);
   const dmChannels = game.employees.map((e) => `dm-${e.id}`);
 
   return (
@@ -146,6 +147,15 @@ export function App() {
             ))}
           </ul>
         </details>
+        <button
+          className="restart"
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm("เริ่มบริษัทใหม่? ค่าสถานะและแชททั้งหมดของบริษัทนี้จะหายไป")) run(api.reset);
+          }}
+        >
+          ↺ เริ่มบริษัทใหม่
+        </button>
       </aside>
 
       <main className="main">

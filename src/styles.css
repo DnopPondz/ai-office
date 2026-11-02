@@ -124,6 +124,21 @@ button:disabled {
   margin: 6px 0;
 }
 
+.restart {
+  display: block;
+  margin: 20px 8px 0;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.restart:hover:not(:disabled) {
+  color: inherit;
+}
+
 /* Main column */
 .main {
   display: grid;

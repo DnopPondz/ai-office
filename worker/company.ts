@@ -1,9 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import type { ChatMessage, Decision, GameState, MessageKind, OpenRisk, Stats } from "../shared/types";
+import type { ChatMessage, Decision, Employee, GameState, MessageKind, OpenRisk, Stats } from "../shared/types";
 import { AiBudgetError, aiBudgetPercentLeft, hasAiBudget } from "./budget";
 import {
   DEPENDENCIES,
-  EMPLOYEES,
   INITIAL_STATS,
   REGRESSION_CHANCE,
   REGRESSION_EFFECTS,
@@ -23,7 +22,6 @@ import {
   secBotDepPosts,
   secBotPosts,
   truncate,
-  welcomePosts,
   type DraftMessage,
   type PresenceMap,
   type Scene,
@@ -39,8 +37,10 @@ import {
   pickQuietScript,
   regressionScript,
   toScene,
+  welcomePosts,
   type ScriptedScene,
 } from "./scripted";
+import { LEGACY_STAFF, NAME_MEMORY, generateStaff } from "./roster";
 
 const BREACH_CHANCE = 0.3;
 const BREACH_EFFECTS: Partial<Stats> = { security: -20, reputation: -15, cash: -10, uptime: -15 };
@@ -50,6 +50,7 @@ const MESSAGE_LIMIT = 300;
 
 interface StoredState {
   day: number;
+  staff: Employee[];
   stats: Stats;
   presence: PresenceMap;
   // Current version of each npm dependency; patched upgrades move these forward.
@@ -122,7 +123,11 @@ export class Company extends DurableObject<Env> {
       let scripted: ScriptedScene | null = null;
       const aiOk = await hasAiBudget(this.env);
       const live = (input: { event: SceneEvent; openRisks: OpenRisk[] }) =>
-        aiOk ? liveOrNull(() => generateScene(this.env, { ...input, day, stats: s.stats, recent: this.recentChat(14) })) : null;
+        aiOk
+          ? liveOrNull(() =>
+              generateScene(this.env, { ...input, staff: s.staff, day, stats: s.stats, recent: this.recentChat(14) }),
+            )
+          : null;
 
       // An unpatched, actively exploited vulnerability can turn into a breach on any later turn.
       const breach = s.pendingRegression ? null : s.openRisks.find(() => Math.random() < BREACH_CHANCE);
@@ -151,7 +156,7 @@ export class Company extends DurableObject<Env> {
         const plan = await this.planNewsEvent(s, day, aiOk);
         if (plan) {
           // A pooled scene costs no AI; otherwise ask the model while budget remains.
-          scene = plan.poolKey ? await getPooledScene(this.env, plan.poolKey) : null;
+          scene = plan.poolKey ? await getPooledScene(this.env, plan.poolKey, s.staff) : null;
           scene ??= await live({ event: plan.event, openRisks: plan.risk ? [...s.openRisks, plan.risk] : s.openRisks });
           if (scene) {
             // Without a scene the event stays unseen and comes back on a later turn.
@@ -167,7 +172,7 @@ export class Company extends DurableObject<Env> {
         }
         if (!scene) {
           // Quiet office days are always scripted, as are news turns once the AI budget is spent.
-          const quiet = pickQuietScript(s.recentScripts);
+          const quiet = pickQuietScript(s.recentScripts, s.staff);
           s.recentScripts = [quiet.id, ...s.recentScripts].slice(0, QUIET_REPEAT_GAP);
           scripted = quiet;
         }
@@ -175,7 +180,7 @@ export class Company extends DurableObject<Env> {
 
       s.scriptedReactions = null;
       if (scripted) {
-        const built = toScene(scripted);
+        const built = toScene(scripted, s.staff);
         scene = built.scene;
         s.scriptedReactions = built.reactions;
       }
@@ -183,7 +188,7 @@ export class Company extends DurableObject<Env> {
       if (!scene) throw new Error("พนักงาน AI ตอบไม่ครบ ลองกดใหม่อีกครั้ง");
       posts.push(...scene.messages);
 
-      s.presence = mergePresence(eventPresence(event, s.presence), scene.presence);
+      s.presence = mergePresence(eventPresence(event, s.presence, s.staff), scene.presence);
       s.day = day;
       s.decision = {
         id: crypto.randomUUID(),
@@ -242,6 +247,7 @@ export class Company extends DurableObject<Env> {
       } else {
         try {
           const aftermath = await generateAftermath(this.env, {
+            staff: s.staff,
             prompt: decision.prompt,
             chosen,
             others: decision.options.filter((o) => o.id !== chosen.id),
@@ -252,7 +258,7 @@ export class Company extends DurableObject<Env> {
         } catch (err) {
           // Reactions are flavour; the decision itself still counts.
           if (!(err instanceof AiBudgetError)) console.error("aftermath failed", err);
-          posts.push(...fallbackReactions(chosen));
+          posts.push(...fallbackReactions(chosen, s.staff));
         }
       }
 
@@ -336,11 +342,13 @@ export class Company extends DurableObject<Env> {
 
   private async load(): Promise<StoredState> {
     const existing = await this.ctx.storage.get<StoredState>("state");
-    // Older companies predate the office map and dependency tracking; fill in the gaps.
+    // Older companies predate the office map, dependency tracking and generated staff; fill in the gaps.
     if (existing) {
+      const staff = existing.staff ?? LEGACY_STAFF;
       return {
         ...existing,
-        presence: existing.presence ?? defaultPresence(),
+        staff,
+        presence: existing.presence ?? defaultPresence(staff),
         deps: existing.deps ?? defaultDeps(),
         pendingRegression: existing.pendingRegression ?? null,
         prCounter: existing.prCounter ?? 0,
@@ -349,10 +357,15 @@ export class Company extends DurableObject<Env> {
         openRisks: existing.openRisks.map((r) => ({ ...r, kind: r.kind ?? "kev", layer: r.layer ?? "edge", component: r.component ?? r.title })),
       };
     }
+    // Names used by this player's earlier companies survive resets, so new staff feel new.
+    const usedNames = (await this.ctx.storage.get<string[]>("usedNames")) ?? [];
+    const staff = generateStaff(usedNames);
+    await this.ctx.storage.put("usedNames", [...staff.map((e) => e.name), ...usedNames].slice(0, NAME_MEMORY));
     const fresh: StoredState = {
       day: 0,
+      staff,
       stats: { ...INITIAL_STATS },
-      presence: defaultPresence(),
+      presence: defaultPresence(staff),
       deps: defaultDeps(),
       pendingRegression: null,
       prCounter: 0,
@@ -363,7 +376,7 @@ export class Company extends DurableObject<Env> {
       recentScripts: [],
       gameOver: null,
     };
-    this.insert(welcomePosts());
+    this.insert(welcomePosts(staff));
     await this.save(fresh);
     return fresh;
   }
@@ -405,7 +418,8 @@ export class Company extends DurableObject<Env> {
     return {
       day: s.day,
       stats: s.stats,
-      employees: EMPLOYEES.map(({ id, name, role, emoji }) => ({ id, name, role, emoji })),
+      // Personality, secret goal and speech stay server-side.
+      employees: s.staff.map(({ id, name, role, emoji, avatar }) => ({ id, name, role, emoji, avatar })),
       presence: s.presence,
       stack: STACK.map(({ name, layer }) => ({ name, layer })),
       deps: DEPENDENCIES.map((d) => ({ name: d.name, version: s.deps[d.name] ?? d.version })),

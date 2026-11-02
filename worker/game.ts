@@ -8,6 +8,7 @@ import type {
   OfficeSpot,
   OpenRisk,
   Presence,
+  RoleKey,
   StackItem,
   StackLayer,
   StatKey,
@@ -15,6 +16,7 @@ import type {
 } from "../shared/types";
 import { OFFICE_SPOTS, STAT_KEYS, STAT_LABELS } from "../shared/types";
 import { AiBudgetError, hasAiBudget, markBudgetExhausted, recordNeurons } from "./budget";
+import { holder, speechNote } from "./roster";
 
 export const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 // Workers AI price for MODEL (developers.cloudflare.com/workers-ai/platform/pricing).
@@ -22,57 +24,6 @@ const NEURONS_PER_M_INPUT = 9091;
 const NEURONS_PER_M_OUTPUT = 27273;
 
 export const INITIAL_STATS: Stats = { cash: 70, morale: 65, security: 50, reputation: 60, uptime: 90 };
-
-export const EMPLOYEES: Employee[] = [
-  {
-    id: "kan",
-    name: "กาน",
-    role: "Senior Dev",
-    emoji: "👨‍💻",
-    personality: "เก่งมากแต่ขี้เกียจ patch ชอบพูดว่า 'เดี๋ยวค่อยทำ' ประชดเก่ง",
-    secretGoal: "แอบสัมภาษณ์งานกับบริษัทอื่นอยู่ ไม่อยากให้ใครรู้",
-  },
-  {
-    id: "mai",
-    name: "ใหม่",
-    role: "Security Engineer",
-    emoji: "🛡️",
-    personality: "ระแวงทุกอย่าง ชอบพูดว่า 'บอกแล้ว' ใช้อีโมจิเยอะเวลาตกใจ",
-    secretGoal: "อยากได้งบ security เพิ่มเป็นสองเท่า ใช้ทุกเหตุการณ์เป็นข้ออ้าง",
-  },
-  {
-    id: "oat",
-    name: "โอ๊ต",
-    role: "Sales",
-    emoji: "💼",
-    personality: "มองทุกอย่างเป็นยอดขาย ไม่ยอมให้ระบบล่มแม้แต่นาทีเดียว พูดภาษาเซลส์",
-    secretGoal: "ต้องปิดดีลลูกค้ารายใหญ่ให้ได้ในไตรมาสนี้ ไม่งั้นโดนตัดคอมมิชชั่น",
-  },
-  {
-    id: "fah",
-    name: "ฟ้า",
-    role: "DevOps",
-    emoji: "⚙️",
-    personality: "ทำงานหนักจนใกล้หมดไฟ ตอบสั้น เหนื่อย แต่รับผิดชอบสูง",
-    secretGoal: "อยากให้ CEO เห็นคุณค่าและขึ้นเงินเดือน ถ้าไม่ได้จะลาออก",
-  },
-  {
-    id: "ton",
-    name: "ต้น",
-    role: "Intern",
-    emoji: "🐣",
-    personality: "กระตือรือร้น ซื่อ กดทุกอย่าง ถามเยอะ บางทีทำพังโดยไม่ตั้งใจ",
-    secretGoal: "อยากได้บรรจุเป็นพนักงานประจำ พยายามทำตัวให้เด่น",
-  },
-  {
-    id: "prae",
-    name: "แพร",
-    role: "Product Manager",
-    emoji: "📋",
-    personality: "สุภาพต่อหน้า การเมืองเก่ง ชอบโยนความผิดอย่างแนบเนียน",
-    secretGoal: "อยากเป็น CEO แทน กำลังเก็บหลักฐานความผิดพลาดของ CEO",
-  },
-];
 
 // The fictional company's systems. KEV news is matched against these keywords by
 // product name only; npm dependencies below are checked by exact version via OSV.
@@ -123,9 +74,11 @@ export type SceneEvent =
   | { kind: "breach"; risk: OpenRisk }
   | { kind: "quiet" };
 
-// Company context is left out for pooled scenes, which are generated ahead of time for any company.
+// Company context is left out for pooled scenes, which are generated ahead of time for any
+// company with ROLE_CAST as the staff.
 export interface SceneInput {
   event: SceneEvent;
+  staff: Employee[];
   day?: number;
   stats?: Stats;
   recent?: string[];
@@ -140,8 +93,8 @@ export interface Scene {
   presence: Partial<PresenceMap>;
 }
 
-export function defaultPresence(): PresenceMap {
-  return Object.fromEntries(EMPLOYEES.map((e) => [e.id, { spot: "desk", activity: "ทำงานตามปกติ", mood: "🙂" }]));
+export function defaultPresence(staff: Employee[]): PresenceMap {
+  return Object.fromEntries(staff.map((e) => [e.id, { spot: "desk", activity: "ทำงานตามปกติ", mood: "🙂" }]));
 }
 
 export function mergePresence(base: PresenceMap, update: Partial<PresenceMap>): PresenceMap {
@@ -151,29 +104,34 @@ export function mergePresence(base: PresenceMap, update: Partial<PresenceMap>): 
 }
 
 // Baseline movement for an event; the model's own presence answer overrides it.
-export function eventPresence(event: SceneEvent, previous: PresenceMap): PresenceMap {
-  const next: PresenceMap = { ...defaultPresence(), ...previous };
+export function eventPresence(event: SceneEvent, previous: PresenceMap, staff: Employee[]): PresenceMap {
+  const next: PresenceMap = Object.fromEntries(
+    staff.map((e) => [e.id, previous[e.id] ?? { spot: "desk", activity: "ทำงานตามปกติ", mood: "🙂" }]),
+  );
+  const set = (role: RoleKey, p: Presence) => {
+    const person = holder(staff, role);
+    if (person) next[person.id] = p;
+  };
   if (event.kind === "breach") {
-    for (const e of EMPLOYEES) next[e.id] = { spot: "meeting", activity: "ประชุมด่วนเรื่องโดนเจาะ", mood: "😰" };
-    next.mai = { spot: "server", activity: "กู้ระบบ", mood: "🚨" };
-    next.fah = { spot: "server", activity: "ไล่ดู log", mood: "😵" };
-    next.kan = { spot: "server", activity: "หาว่าเข้ามาทางไหน", mood: "😬" };
+    for (const e of staff) next[e.id] = { spot: "meeting", activity: "ประชุมด่วนเรื่องโดนเจาะ", mood: "😰" };
+    set("sec", { spot: "server", activity: "กู้ระบบ", mood: "🚨" });
+    set("ops", { spot: "server", activity: "ไล่ดู log", mood: "😵" });
+    set("dev", { spot: "server", activity: "หาว่าเข้ามาทางไหน", mood: "😬" });
   } else if (event.kind === "news" && event.matched.length) {
-    next.mai = { spot: "server", activity: "ตรวจช่องโหว่", mood: "😨" };
-    next.fah = { spot: "server", activity: "เช็คเวอร์ชันเครื่อง", mood: "😮‍💨" };
+    set("sec", { spot: "server", activity: "ตรวจช่องโหว่", mood: "😨" });
+    set("ops", { spot: "server", activity: "เช็คเวอร์ชันเครื่อง", mood: "😮‍💨" });
   } else if (event.kind === "dependency") {
-    next.ton = { spot: "desk", activity: "เปิด PR อัปเกรดแพ็กเกจ", mood: "🤓" };
-    next.kan = { spot: "desk", activity: "รีวิว PR แบบไม่เต็มใจ", mood: "🙄" };
+    set("intern", { spot: "desk", activity: "เปิด PR อัปเกรดแพ็กเกจ", mood: "🤓" });
+    set("dev", { spot: "desk", activity: "รีวิว PR", mood: "🧐" });
   } else if (event.kind === "regression") {
-    next.kan = { spot: "server", activity: "หาว่าอะไรพัง", mood: "😬" };
-    next.fah = { spot: "server", activity: "เตรียม rollback", mood: "😵" };
-    next.ton = { spot: "desk", activity: "ทำหน้าไม่รู้เรื่อง", mood: "😰" };
+    set("dev", { spot: "server", activity: "หาว่าอะไรพัง", mood: "😬" });
+    set("ops", { spot: "server", activity: "เตรียม rollback", mood: "😵" });
+    set("intern", { spot: "desk", activity: "ทำหน้าไม่รู้เรื่อง", mood: "😰" });
   }
   return next;
 }
 
 export const CHANNELS = ["general", "dev", "security-alerts", "random"];
-const AI_CHANNELS = new Set(["general", "dev", "random", ...EMPLOYEES.map((e) => `dm-${e.id}`)]);
 
 export function matchStackItems(news: NewsItem): StackItem[] {
   const haystack = `${news.name} ${news.products.join(" ")}`.toLowerCase();
@@ -208,23 +166,6 @@ export function checkGameOver(stats: Stats): string | null {
   if (stats.uptime <= 0) return "ระบบล่มถาวร กู้ไม่ขึ้น 🔥";
   if (stats.security <= 0) return "โดนเจาะจนข้อมูลลูกค้าหลุดทั้งหมด 🏴‍☠️";
   return null;
-}
-
-export function welcomePosts(): DraftMessage[] {
-  return [
-    {
-      channel: "general",
-      author: "system",
-      kind: "system",
-      text:
-        "👋 ยินดีต้อนรับ CEO คนใหม่! กด 'เหตุการณ์ถัดไป' เพื่อเริ่มวันทำงาน\n" +
-        "ข่าวใน #security-alerts เป็นข่าวจริงจาก CISA KEV (ผ่าน NVD) ส่วนบริษัทและพนักงานเป็นเรื่องสมมติ",
-    },
-    { channel: "general", author: "prae", text: "ยินดีต้อนรับค่ะ CEO 😊 มีอะไรให้แพรช่วยบอกได้เลยนะคะ" },
-    { channel: "general", author: "ton", text: "สวัสดีครับบบ ผมต้น intern ครับ!! พร้อมลุยทุกงานครับ 💪" },
-    { channel: "dev", author: "kan", text: "CEO ใหม่อีกแล้วเหรอ... ก็ดี ขอแค่อย่าเพิ่งสั่ง refactor ก็พอ" },
-    { channel: "dev", author: "mai", text: "ขอเตือนไว้ก่อนเลยนะคะ ระบบเรายังไม่ได้ patch หลายตัว 🫠" },
-  ];
 }
 
 // SecBot posts are built from feed data only, never from the model, so facts stay exact.
@@ -296,7 +237,8 @@ Employees address the player as "CEO" or "พี่ CEO" (never "บอส", to 
 
 Rules:
 - Write every message in natural, casual Thai (Slack style, short, emoji allowed). The "author" field must be an employee id from the list.
-- Stay in character. Personality drives tone. Secret goals leak subtly through hints, DMs and gossip; never state them outright.
+- Stay in character. Personality drives tone. Follow each employee's speech style exactly (polite particle and how they refer to themselves).
+- Names written in braces, like {ops}, are placeholders: copy them exactly as written, braces included. Secret goals leak subtly through hints, DMs and gossip; never state them outright.
 - Facts about real-world news come ONLY from the NEWS block. Do not invent CVE numbers, versions, vendors, dates or technical details. Anything beyond the block is an employee's opinion or guess.
 - Never write exploit code, payloads or step-by-step attack instructions. Discuss impact, patching, mitigation and detection at a high level.
 - Do not mock or accuse real companies or people. Characters can be frustrated with the situation, not insult vendors.
@@ -378,7 +320,7 @@ const AFTERMATH_SCHEMA = {
   required: ["messages", "presence"],
 };
 
-function describeEvent(event: SceneEvent): string {
+function describeEvent(event: SceneEvent, staff: Employee[]): string {
   if (event.kind === "breach") {
     return `INCIDENT (simulated): attackers exploited the still-unpatched ${event.risk.newsId} (${event.risk.title}) in our systems.
 The team reacts: panic, blame, incident response. The decision is about incident response trade-offs (all options "patches": false).`;
@@ -391,8 +333,8 @@ The team reacts: panic, blame, incident response. The decision is about incident
       `package: ${v.package}, our pinned version: ${event.currentVersion}, fixed in: ${v.fixed ?? "no fix yet"}`,
       `severity: ${v.severity ?? "unknown"}`,
       `summary: ${truncate(v.summary, 400)}`,
-      `IMPACT: our package.json pins the vulnerable version. Ton (intern) already opened a pull request upgrading ${v.package} to ${v.fixed ?? "a fixed version"}.
-The team argues: merge now (an upgrade can break things), test first, or postpone. Kan must review it.
+      `IMPACT: our package.json pins the vulnerable version. ${holder(staff, "intern")?.name ?? "A developer"} already opened a pull request upgrading ${v.package} to ${v.fixed ?? "a fixed version"}.
+The team argues: merge now (an upgrade can break things), test first, or postpone. ${holder(staff, "dev")?.name ?? "The senior dev"} must review it.
 Only the option that merges the upgrade has "patches": true.`,
     ].join("\n");
   }
@@ -427,9 +369,7 @@ function scenePrompt(input: SceneInput): string {
     ...(input.day !== undefined ? [`DAY: ${input.day}`] : []),
     ...(stats ? [`COMPANY STATS (0-100): ${STAT_KEYS.map((k) => `${k}=${stats[k]}`).join(", ")}`] : []),
     "EMPLOYEES:",
-    ...EMPLOYEES.map(
-      (e) => `- id=${e.id} | ${e.name} | ${e.role} | personality: ${e.personality} | secret goal: ${e.secretGoal}`,
-    ),
+    ...staffLines(input.staff),
     `COMPANY TECH STACK (fictional): ${STACK.map((s) => s.name).join(", ")}`,
     ...(openRisks ? [`OPEN UNPATCHED RISKS: ${risks}`] : []),
     ...(recent
@@ -437,7 +377,7 @@ function scenePrompt(input: SceneInput): string {
       : ["(This scene can be shown at any point in a game: do not refer to earlier chat, the day number or stats.)"]),
     "",
     "EVENT:",
-    describeEvent(input.event),
+    describeEvent(input.event, input.staff),
     "",
     SCENE_RULES,
   ].join("\n");
@@ -445,26 +385,33 @@ function scenePrompt(input: SceneInput): string {
 
 export async function generateScene(env: Env, input: SceneInput): Promise<Scene> {
   const raw = await runJson(env, scenePrompt(input), SCENE_SCHEMA, 1800);
-  const scene = parseScene(raw);
+  const scene = parseScene(raw, input.staff);
   if (!scene) throw new Error("พนักงาน AI ตอบไม่ครบ ลองกดใหม่อีกครั้ง");
   return scene;
 }
 
 // Also re-checks pooled scenes read back from D1.
-export function parseScene(raw: unknown): Scene | null {
-  const messages = sanitizeMessages(isRecord(raw) ? raw.messages : null);
+export function parseScene(raw: unknown, staff: Employee[]): Scene | null {
+  const messages = sanitizeMessages(isRecord(raw) ? raw.messages : null, staff);
   const decision = sanitizeDecision(isRecord(raw) ? raw.decision : null);
   if (!messages.length || !decision) return null;
-  return { messages, decision, presence: sanitizePresence(isRecord(raw) ? raw.presence : null) };
+  return { messages, decision, presence: sanitizePresence(isRecord(raw) ? raw.presence : null, staff) };
+}
+
+function staffLines(staff: Employee[]): string[] {
+  return staff.map(
+    (e) =>
+      `- id=${e.id} | ${e.name} | ${e.role} | personality: ${e.personality} | secret goal: ${e.secretGoal} | speech: ${speechNote(e.speech)}`,
+  );
 }
 
 export async function generateAftermath(
   env: Env,
-  input: { prompt: string; chosen: DecisionOption; others: DecisionOption[]; recent: string[] },
+  input: { staff: Employee[]; prompt: string; chosen: DecisionOption; others: DecisionOption[]; recent: string[] },
 ): Promise<{ messages: DraftMessage[]; presence: Partial<PresenceMap> }> {
   const prompt = [
     "EMPLOYEES:",
-    ...EMPLOYEES.map((e) => `- id=${e.id} | ${e.name} | ${e.role} | personality: ${e.personality} | secret goal: ${e.secretGoal}`),
+    ...staffLines(input.staff),
     "RECENT CHAT:",
     ...input.recent,
     "",
@@ -477,8 +424,8 @@ export async function generateAftermath(
   ].join("\n");
   const raw = await runJson(env, prompt, AFTERMATH_SCHEMA, 900);
   return {
-    messages: sanitizeMessages(isRecord(raw) ? raw.messages : null).slice(0, 6),
-    presence: sanitizePresence(isRecord(raw) ? raw.presence : null),
+    messages: sanitizeMessages(isRecord(raw) ? raw.messages : null, input.staff).slice(0, 6),
+    presence: sanitizePresence(isRecord(raw) ? raw.presence : null, input.staff),
   };
 }
 
@@ -541,15 +488,15 @@ function extractJson(raw: unknown): unknown {
   return value;
 }
 
-function sanitizeMessages(raw: unknown): DraftMessage[] {
+function sanitizeMessages(raw: unknown, staff: Employee[]): DraftMessage[] {
   if (!Array.isArray(raw)) return [];
   const out: DraftMessage[] = [];
   for (const item of raw) {
     if (!isRecord(item)) continue;
-    const author = resolveEmployee(item.author);
+    const author = resolveEmployee(item.author, staff);
     const text = typeof item.text === "string" ? truncate(item.text.trim(), 600) : "";
     if (!author || !text) continue;
-    out.push({ channel: resolveChannel(item.channel), author, text, kind: "chat" });
+    out.push({ channel: resolveChannel(item.channel, staff), author, text, kind: "chat" });
   }
   return out.slice(0, 12);
 }
@@ -577,12 +524,17 @@ function sanitizeDecision(raw: unknown): Scene["decision"] | null {
   return { prompt: truncate(raw.prompt.trim(), 300), options };
 }
 
-function sanitizePresence(raw: unknown): Partial<PresenceMap> {
+function sanitizePresence(raw: unknown, staff: Employee[]): Partial<PresenceMap> {
   const out: Partial<PresenceMap> = {};
-  if (!Array.isArray(raw)) return out;
-  for (const item of raw) {
+  // The model answers with an array; pooled scenes read back from D1 hold the sanitized map.
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw)
+      ? Object.entries(raw).map(([employee, p]) => ({ employee, ...(isRecord(p) ? p : {}) }))
+      : [];
+  for (const item of items) {
     if (!isRecord(item)) continue;
-    const id = resolveEmployee(item.employee);
+    const id = resolveEmployee(item.employee, staff);
     const spot = typeof item.spot === "string" ? (item.spot.trim().toLowerCase() as OfficeSpot) : null;
     if (!id || !spot || !OFFICE_SPOTS.includes(spot)) continue;
     const activity = typeof item.activity === "string" ? truncate(item.activity.trim(), 40) : "";
@@ -593,15 +545,15 @@ function sanitizePresence(raw: unknown): Partial<PresenceMap> {
   return out;
 }
 
-function resolveEmployee(value: unknown): string | null {
+function resolveEmployee(value: unknown, staff: Employee[]): string | null {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
-  return EMPLOYEES.find((e) => e.id === v || e.name === value.trim())?.id ?? null;
+  return staff.find((e) => e.id === v || e.name === value.trim())?.id ?? null;
 }
 
-function resolveChannel(value: unknown): string {
+function resolveChannel(value: unknown, staff: Employee[]): string {
   const v = typeof value === "string" ? value.trim().toLowerCase().replace(/^#/, "") : "";
-  return AI_CHANNELS.has(v) ? v : "general";
+  return ["general", "dev", "random"].includes(v) || staff.some((e) => v === `dm-${e.id}`) ? v : "general";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

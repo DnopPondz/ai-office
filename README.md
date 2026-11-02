@@ -14,6 +14,7 @@
 | `worker/game.ts` | พนักงาน, stack บริษัท, prompt และตัวกรองผลลัพธ์ AI |
 | `worker/news.ts` | ดึงข่าว KEV จาก NVD เก็บลง D1 |
 | `worker/osv.ts` | ช่องโหว่ของ npm dependency สมมติ จาก OSV.dev |
+| `worker/roster.ts` | สุ่มพนักงานต่อบริษัท: ชื่อไม่ซ้ำ, ตำแหน่ง, นิสัย, เป้าหมายลับ, คำลงท้าย, รูป pixel |
 | `worker/budget.ts` | นับ neurons ของ Workers AI ทั้งบัญชีต่อวัน |
 | `worker/pool.ts` | cron นาทีที่ 47 สร้างฉากข่าวล่วงหน้าด้วยโควตาที่เหลือ |
 | `worker/scripted.ts` | ฉากที่เขียนไว้แล้ว: วันไม่มีข่าว และสำรองตอนโควตาหมด |

@@ -34,16 +34,36 @@ export interface Presence {
   mood: string;
 }
 
+// 8-bit character recipe: hair/accessory overlays plus palette colours (see src/pixel.tsx).
+export interface AvatarSpec {
+  looks: string[];
+  palette: Record<string, string>;
+}
+
 export interface PublicEmployee {
   id: string;
   name: string;
   role: string;
   emoji: string;
+  avatar?: AvatarSpec;
+}
+
+// The job an employee fills; scripted scenes and pooled scenes are written against these.
+export type RoleKey = "dev" | "sec" | "sales" | "ops" | "intern" | "pm";
+
+// How someone talks, so the model and scripted lines use the same particles for them.
+export interface Speech {
+  self: string; // first person: ผม, เรา, or their own name
+  end: string; // statement particle: ครับ, ค่ะ, or none
+  ask: string; // question / softener particle: ครับ, คะ, or none
 }
 
 export interface Employee extends PublicEmployee {
+  roleKey: RoleKey;
   personality: string;
   secretGoal: string;
+  speech: Speech;
+  avatar: AvatarSpec;
 }
 
 // Which part of the fictional company's infrastructure a component belongs to;
