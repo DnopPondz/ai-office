@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wedeb",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-30",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  "ai": { "binding": "AI" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wedeb-db",
+      "database_id": "e77ba0f7-7baf-4f34-80d4-3ea760fd3a8e",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "COMPANY", "class_name": "Company" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Company"] }],
+  "triggers": { "crons": ["17 * * * *"] }
+}

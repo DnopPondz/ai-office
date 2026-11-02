@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npm run build)",
+      "Bash(npm run preview)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run cf-typegen)",
+      "Bash(npm run db:migrate:local)",
+      "Bash(npm ci)",
+      "Bash(npm install)",
+      "Bash(npm ls *)",
+      "Bash(npm outdated)",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)",
+      "Bash(npx wrangler types *)",
+      "Bash(npx wrangler whoami)",
+      "Bash(npx wrangler d1 migrations list wedeb-db --local)",
+      "Bash(npx wrangler d1 migrations apply wedeb-db --local)",
+      "Bash(npx wrangler d1 execute wedeb-db --local *)",
+      "PowerShell(npm run dev)",
+      "PowerShell(npm run build)",
+      "PowerShell(npm run preview)",
+      "PowerShell(npm run typecheck)",
+      "PowerShell(npm run cf-typegen)",
+      "PowerShell(npm run db:migrate:local)",
+      "PowerShell(npm ci)",
+      "PowerShell(npm install)",
+      "PowerShell(npx tsc *)",
+      "PowerShell(npx vite *)",
+      "PowerShell(npx wrangler types *)"
+    ]
+  }
+}
